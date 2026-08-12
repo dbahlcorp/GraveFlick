@@ -37,7 +37,7 @@ final class SoundManager {
         guard settings.musicEnabled, !musicNode.isPlaying else { return }
         let notes: [Double] = [55, 65.41, 73.42, 49]
         let duration = 8.0
-        guard let buffer = makeBuffer(duration: duration) { return }
+        guard let buffer = makeBuffer(duration: duration) else { return }
         let frames = Int(buffer.frameLength)
         let sampleRate = format.sampleRate
         if let channel = buffer.floatChannelData?[0] {
