@@ -6,8 +6,18 @@ enum GameRules {
     static let maximumFlickSpeed: CGFloat = 2_200
 
     static func score(for kind: ZombieKind, combo: Int) -> Int {
-        let base = kind == .brute ? 250 : 100
-        return base + max(0, combo - 1) * 25
+        kind.scoreValue + max(0, combo - 1) * 25
+    }
+
+    static func stars(score: Int, health: Int, startingHealth: Int, won: Bool) -> Int {
+        guard won else { return 0 }
+        if health == startingHealth && score >= 2_000 { return 3 }
+        if health >= max(1, startingHealth / 2) { return 2 }
+        return 1
+    }
+
+    static func cooldown(base: TimeInterval, rapidGearLevel: Int) -> TimeInterval {
+        base * max(0.68, 1 - Double(rapidGearLevel) * 0.08)
     }
 }
 
@@ -31,4 +41,3 @@ enum FlickMath {
         return CGVector(dx: vector.dx * scale, dy: vector.dy * scale)
     }
 }
-

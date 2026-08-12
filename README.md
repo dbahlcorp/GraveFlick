@@ -4,15 +4,18 @@ GraveFlick is an original, touch-first survival-comedy prototype for iPhone and 
 
 The project takes inspiration from the tactile physics of early mobile games while using an original name, setting, characters, code, and programmatic art.
 
-## Playable prototype
+## Complete vertical slice
 
-- Direct one-finger grabbing, dragging, flicking, and ground slams
-- Physics-driven throws with impact-based defeats
-- Walkers and heavier brutes with different speed and toughness
-- Endless waves, escalating spawn pressure, health, scoring, and combos
-- Pause, restart, game-over, screen shake, impact bursts, and lightweight animation
-- Responsive landscape layout for iPhone and iPad
-- No third-party runtime dependencies and no external art assets
+- Direct one-finger grabbing, dragging, flicking, and height-sensitive ground slams
+- Six original illustrated enemies with different speed, weight, armor, health, and diner damage
+- Zombie-to-zombie collisions, volatile chain explosions, combo scoring, and Grave Time
+- Three weapons: Bowling Ball, Scatterblast, and Neon Airstrike
+- Two traps: Spike Strip and Flash Freezer
+- Five finite levels with escalating waves, stars, rewards, unlocks, and high scores
+- Persistent coins, upgrades, level progress, tutorial state, and settings
+- Synthesized music and effects, optional haptics, reduced motion, and high contrast
+- Original generated app icon and character atlas integrated into the runtime
+- No advertising, accounts, analytics, tracking, or third-party runtime dependencies
 
 ## Open in Xcode
 
@@ -37,7 +40,10 @@ The deployment target is iOS 17. The bundle identifier is `com.bahlcorp.gravefli
 - `Tests`: unit tests for touch velocity and scoring math
 - `project.yml`: XcodeGen project definition
 
-## Roadmap
+## Privacy and store preparation
 
-The next vertical-slice milestones are original illustrated sprite sheets, sound and haptics, usable traps, weapon pickups, progression, accessibility options, and device playtesting.
+See `PRIVACY.md` for the privacy policy and `STORE_METADATA.md` for grounded App Store copy. The privacy manifest declares local preferences access and no tracking or collected data.
 
+## Remaining release work
+
+The code and simulator tests are validated by GitHub Actions. Physical-device balancing, final screenshots, Apple signing, App Store Connect creation, TestFlight distribution, and age-rating review still require live Apple developer access.

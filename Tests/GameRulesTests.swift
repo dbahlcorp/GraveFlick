@@ -25,6 +25,18 @@ final class GameRulesTests: XCTestCase {
     func testComboAndBruteScoring() {
         XCTAssertEqual(GameRules.score(for: .walker, combo: 1), 100)
         XCTAssertEqual(GameRules.score(for: .walker, combo: 3), 150)
-        XCTAssertEqual(GameRules.score(for: .brute, combo: 2), 275)
+        XCTAssertEqual(GameRules.score(for: .brute, combo: 2), 325)
+    }
+
+    func testStarsRewardSurvivalAndScore() {
+        XCTAssertEqual(GameRules.stars(score: 2_500, health: 5, startingHealth: 5, won: true), 3)
+        XCTAssertEqual(GameRules.stars(score: 900, health: 3, startingHealth: 5, won: true), 2)
+        XCTAssertEqual(GameRules.stars(score: 900, health: 1, startingHealth: 5, won: true), 1)
+        XCTAssertEqual(GameRules.stars(score: 9_000, health: 5, startingHealth: 5, won: false), 0)
+    }
+
+    func testRapidGearCooldownHasFloor() {
+        XCTAssertEqual(GameRules.cooldown(base: 10, rapidGearLevel: 2), 8.4, accuracy: 0.001)
+        XCTAssertEqual(GameRules.cooldown(base: 10, rapidGearLevel: 99), 6.8, accuracy: 0.001)
     }
 }

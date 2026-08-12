@@ -1,145 +1,632 @@
 import SpriteKit
 import SwiftUI
 
+enum AppScreen {
+    case menu, levels, upgrades, settings, credits, game
+}
+
 @MainActor
-final class GameViewModel: ObservableObject, GameSceneDelegate {
+final class AppModel: ObservableObject {
+    @Published var screen: AppScreen = .menu
+    @Published var session: GameSessionModel?
+    let store = ProgressStore()
+
+    init() {
+        SoundManager.shared.apply(store.settings)
+    }
+
+    func start(_ level: GameLevel) {
+        session = GameSessionModel(level: level, progress: store.progress, settings: store.settings) { [weak self] result in
+            self?.store.complete(result)
+        }
+        screen = .game
+        SoundManager.shared.apply(store.settings)
+        SoundManager.shared.startMusic()
+    }
+
+    func leaveGame() {
+        session = nil
+        screen = .menu
+    }
+
+    func handleBackgrounding() {
+        session?.pauseForBackground()
+    }
+}
+
+@MainActor
+final class GameSessionModel: ObservableObject, GameSceneDelegate {
     @Published private(set) var score = 0
     @Published private(set) var wave = 1
     @Published private(set) var health = GameRules.startingHealth
+    @Published private(set) var specialCharge = 0.0
+    @Published private(set) var weaponCooldowns: [WeaponKind: TimeInterval] = [:]
+    @Published private(set) var trapCooldowns: [TrapKind: TimeInterval] = [:]
     @Published private(set) var isPaused = false
-    @Published private(set) var isGameOver = false
+    @Published private(set) var result: LevelResult?
+    @Published var showsTutorial: Bool
 
+    let level: GameLevel
+    let progress: PlayerProgress
     let scene: GameScene
+    private let completion: (LevelResult) -> Void
 
-    init() {
-        scene = GameScene(size: CGSize(width: 1194, height: 834))
-        scene.scaleMode = .resizeFill
+    init(level: GameLevel, progress: PlayerProgress, settings: GameSettings, completion: @escaping (LevelResult) -> Void) {
+        self.level = level
+        self.progress = progress
+        self.completion = completion
+        showsTutorial = !progress.hasSeenTutorial
+        health = GameRules.startingHealth + progress.upgradeLevel(.reinforcedDiner)
+        scene = GameScene(level: level, progress: progress, settings: settings, size: CGSize(width: 1194, height: 834))
         scene.gameDelegate = self
+        if showsTutorial { scene.isGameplayPaused = true }
     }
 
-    func gameScene(_ scene: GameScene, didUpdateScore score: Int, wave: Int, health: Int) {
-        self.score = score
-        self.wave = wave
-        self.health = health
+    func gameScene(_ scene: GameScene, didUpdate snapshot: GameHUDSnapshot) {
+        score = snapshot.score
+        wave = snapshot.wave
+        health = snapshot.health
+        specialCharge = snapshot.specialCharge
+        weaponCooldowns = snapshot.weaponCooldowns
+        trapCooldowns = snapshot.trapCooldowns
     }
 
-    func gameSceneDidEnd(_ scene: GameScene) {
-        isGameOver = true
+    func gameScene(_ scene: GameScene, didFinish result: LevelResult) {
+        self.result = result
         isPaused = false
+        completion(result)
     }
 
     func togglePause() {
-        guard !isGameOver else { return }
+        guard result == nil, !showsTutorial else { return }
         isPaused.toggle()
         scene.isGameplayPaused = isPaused
     }
 
-    func restart() {
-        score = 0
-        wave = 1
-        health = GameRules.startingHealth
-        isPaused = false
-        isGameOver = false
-        scene.restart()
+    func pauseForBackground() {
+        guard result == nil, !showsTutorial else { return }
+        isPaused = true
+        scene.isGameplayPaused = true
     }
+
+    func dismissTutorial(store: ProgressStore) {
+        showsTutorial = false
+        store.markTutorialSeen()
+        scene.isGameplayPaused = false
+    }
+
+    func use(_ weapon: WeaponKind) { scene.useWeapon(weapon) }
+    func use(_ trap: TrapKind) { scene.useTrap(trap) }
+    func useSpecial() { scene.useSpecial() }
 }
 
 struct GameRootView: View {
-    @StateObject private var model = GameViewModel()
+    @StateObject private var model = AppModel()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack {
-            SpriteView(scene: model.scene, options: [.ignoresSiblingOrder])
-                .ignoresSafeArea()
-
-            VStack(spacing: 0) {
-                hud
-                Spacer()
-                instructionCard
-            }
-            .padding(.horizontal, 22)
-            .padding(.vertical, 14)
-
-            if model.isPaused {
-                modal(title: "Night Shift Paused", subtitle: "The horde will wait.", button: "Resume") {
-                    model.togglePause()
-                }
-            }
-
-            if model.isGameOver {
-                modal(title: "The Last Light Went Dark", subtitle: "Final score: \(model.score)", button: "Try Again") {
-                    model.restart()
+            switch model.screen {
+            case .menu:
+                MainMenuView(model: model)
+            case .levels:
+                LevelSelectView(model: model, store: model.store)
+            case .upgrades:
+                UpgradeShopView(model: model, store: model.store)
+            case .settings:
+                SettingsView(model: model, store: model.store)
+            case .credits:
+                CreditsView(model: model, store: model.store)
+            case .game:
+                if let session = model.session {
+                    GameContainerView(model: model, session: session, store: model.store)
                 }
             }
         }
-        .background(Color.black)
-        .persistentSystemOverlays(.hidden)
         .statusBarHidden()
-    }
-
-    private var hud: some View {
-        HStack(spacing: 12) {
-            statPill(icon: "star.fill", label: "SCORE", value: "\(model.score)", color: .yellow)
-            statPill(icon: "moon.stars.fill", label: "WAVE", value: "\(model.wave)", color: .cyan)
-            statPill(icon: "heart.fill", label: "DINER", value: String(repeating: "♥", count: model.health), color: .red)
-            Spacer()
-            Button(action: model.togglePause) {
-                Image(systemName: model.isPaused ? "play.fill" : "pause.fill")
-                    .font(.title3.weight(.black))
-                    .frame(width: 48, height: 44)
-                    .foregroundStyle(.white)
-                    .background(.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 14))
-                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.2)))
-            }
-            .buttonStyle(.plain)
-        }
-    }
-
-    private var instructionCard: some View {
-        Text("GRAB  •  FLICK  •  SLAM")
-            .font(.caption.weight(.black))
-            .tracking(2)
-            .foregroundStyle(.white.opacity(0.86))
-            .padding(.horizontal, 16)
-            .padding(.vertical, 9)
-            .background(.black.opacity(0.48), in: Capsule())
-            .accessibilityLabel("Grab a creature, flick it, and slam it into the pavement")
-    }
-
-    private func statPill(icon: String, label: String, value: String, color: Color) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: icon).foregroundStyle(color)
-            VStack(alignment: .leading, spacing: 0) {
-                Text(label).font(.system(size: 9, weight: .black)).foregroundStyle(.white.opacity(0.6))
-                Text(value).font(.system(size: 17, weight: .black, design: .rounded)).foregroundStyle(.white)
-            }
-        }
-        .padding(.horizontal, 13)
-        .frame(height: 44)
-        .background(.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.2)))
-    }
-
-    private func modal(title: String, subtitle: String, button: String, action: @escaping () -> Void) -> some View {
-        ZStack {
-            Color.black.opacity(0.58).ignoresSafeArea()
-            VStack(spacing: 14) {
-                Text(title)
-                    .font(.system(size: 30, weight: .black, design: .rounded))
-                    .multilineTextAlignment(.center)
-                Text(subtitle).foregroundStyle(.white.opacity(0.72))
-                Button(button, action: action)
-                    .buttonStyle(.borderedProminent)
-                    .tint(Color(red: 0.92, green: 0.32, blue: 0.18))
-                    .fontWeight(.bold)
-                    .controlSize(.large)
-            }
-            .foregroundStyle(.white)
-            .padding(34)
-            .background(Color(red: 0.08, green: 0.09, blue: 0.14), in: RoundedRectangle(cornerRadius: 26))
-            .overlay(RoundedRectangle(cornerRadius: 26).stroke(.white.opacity(0.18)))
-            .shadow(radius: 30)
+        .persistentSystemOverlays(.hidden)
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { model.handleBackgrounding() }
         }
     }
 }
 
+private struct MainMenuView: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var store: ProgressStore
+
+    init(model: AppModel) {
+        self.model = model
+        store = model.store
+    }
+
+    var body: some View {
+        NightBackground {
+            HStack(spacing: 48) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("GRAVE")
+                        .foregroundStyle(.white)
+                    Text("FLICK")
+                        .foregroundStyle(Color(red: 0.96, green: 0.31, blue: 0.18))
+                    Text("THE LAST LIGHT DINER\nNEVER CLOSES QUIETLY")
+                        .font(.headline.weight(.black))
+                        .tracking(2)
+                        .foregroundStyle(.white.opacity(0.64))
+                        .padding(.top, 4)
+                }
+                .font(.system(size: 72, weight: .black, design: .rounded))
+                .minimumScaleFactor(0.65)
+
+                VStack(spacing: 14) {
+                    MenuButton(title: "PLAY", icon: "play.fill", color: .orange) {
+                        model.start(GameLevel.all[max(0, store.progress.highestUnlockedLevel - 1)])
+                    }
+                    MenuButton(title: "LEVELS", icon: "map.fill", color: .cyan) { model.screen = .levels }
+                    MenuButton(title: "UPGRADES", icon: "wrench.and.screwdriver.fill", color: .purple) { model.screen = .upgrades }
+                    MenuButton(title: "SETTINGS", icon: "gearshape.fill", color: .gray) { model.screen = .settings }
+                    MenuButton(title: "CREDITS", icon: "info.circle.fill", color: .indigo) { model.screen = .credits }
+                    HStack {
+                        Image(systemName: "bolt.circle.fill").foregroundStyle(.yellow)
+                        Text("\(store.progress.currency) NIGHT COINS")
+                    }
+                    .font(.caption.weight(.black))
+                    .foregroundStyle(.white.opacity(0.72))
+                    .padding(.top, 6)
+                    Text(store.dailySummary)
+                        .font(.caption2.weight(.black))
+                        .foregroundStyle(store.progress.dailyClaimed ? .green : .cyan)
+                }
+                .frame(maxWidth: 390)
+            }
+            .padding(46)
+        }
+    }
+}
+
+private struct CreditsView: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var store: ProgressStore
+
+    private let achievements: [(String, String, String)] = [
+        ("first_shift", "First Shift", "Clear any night"),
+        ("perfect_shift", "Perfect Service", "Earn three stars"),
+        ("combo_8", "Eight on the Floor", "Reach an eight-hit combo"),
+        ("score_5000", "Neon Scoreboard", "Score 5,000 in one night"),
+        ("last_light", "Still Glowing", "Clear the final night")
+    ]
+
+    var body: some View {
+        NightBackground {
+            VStack(spacing: 16) {
+                ScreenHeader(title: "CREDITS & ACHIEVEMENTS", subtitle: "An original midnight survival comedy") { model.screen = .menu }
+                HStack(alignment: .top, spacing: 22) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("CREATED BY DBAHLCORP").font(.headline.weight(.black))
+                        Text("Design, gameplay, SwiftUI and SpriteKit implementation built for GraveFlick. Original character and App Store artwork generated specifically for this project with OpenAI image generation and integrated into the runtime.")
+                            .font(.callout).foregroundStyle(.white.opacity(0.64))
+                        Text("No artwork, code, characters, names, audio, or levels were copied from another game.")
+                            .font(.caption.weight(.bold)).foregroundStyle(.cyan)
+                        Text("Local diagnostics use Apple MetricKit and never leave the device through the app.")
+                            .font(.caption).foregroundStyle(.white.opacity(0.52))
+                    }
+                    .padding(20)
+                    .frame(maxWidth: 430, alignment: .leading)
+                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 20))
+
+                    VStack(spacing: 8) {
+                        ForEach(achievements, id: \.0) { item in
+                            let unlocked = store.progress.achievements.contains(item.0)
+                            HStack {
+                                Image(systemName: unlocked ? "trophy.fill" : "lock.fill")
+                                    .foregroundStyle(unlocked ? .yellow : .white.opacity(0.3))
+                                    .frame(width: 30)
+                                VStack(alignment: .leading) {
+                                    Text(item.1).font(.subheadline.weight(.black))
+                                    Text(item.2).font(.caption2).foregroundStyle(.white.opacity(0.55))
+                                }
+                                Spacer()
+                                Text(unlocked ? "+100" : "—").font(.caption.weight(.black)).foregroundStyle(.cyan)
+                            }
+                            .padding(.horizontal, 14)
+                            .frame(height: 52)
+                            .background(Color.white.opacity(unlocked ? 0.09 : 0.045), in: RoundedRectangle(cornerRadius: 14))
+                        }
+                    }
+                    .frame(maxWidth: 440)
+                }
+            }
+            .padding(32)
+        }
+    }
+}
+
+private struct LevelSelectView: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var store: ProgressStore
+
+    var body: some View {
+        NightBackground {
+            VStack(spacing: 18) {
+                ScreenHeader(title: "NIGHT ROUTE", subtitle: "Five stops. One glowing diner.") { model.screen = .menu }
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 16) {
+                        ForEach(GameLevel.all) { level in
+                            let unlocked = level.id <= store.progress.highestUnlockedLevel
+                            Button {
+                                if unlocked { model.start(level) }
+                            } label: {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    HStack {
+                                        Text("0\(level.id)").font(.title2.weight(.black))
+                                        Spacer()
+                                        Image(systemName: unlocked ? "moon.stars.fill" : "lock.fill")
+                                    }
+                                    Text(level.title).font(.title3.weight(.black))
+                                    Text(level.subtitle).font(.caption).foregroundStyle(.white.opacity(0.6))
+                                    Spacer()
+                                    Text(String(repeating: "★", count: store.progress.stars[level.id, default: 0]))
+                                        .foregroundStyle(.yellow)
+                                        .frame(height: 22)
+                                    Text("BEST \(store.progress.highScores[level.id, default: 0])")
+                                        .font(.caption2.weight(.black))
+                                        .foregroundStyle(.white.opacity(0.55))
+                                }
+                                .foregroundStyle(unlocked ? .white : .white.opacity(0.38))
+                                .padding(20)
+                                .frame(width: 210, height: 230)
+                                .background(level.id == store.progress.highestUnlockedLevel ? Color.orange.opacity(0.24) : Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 22))
+                                .overlay(RoundedRectangle(cornerRadius: 22).stroke(unlocked ? Color.white.opacity(0.18) : Color.clear))
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(!unlocked)
+                            .accessibilityLabel("Level \(level.id), \(level.title), \(unlocked ? "unlocked" : "locked")")
+                        }
+                    }
+                    .padding(.horizontal, 4)
+                }
+            }
+            .padding(32)
+        }
+    }
+}
+
+private struct UpgradeShopView: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var store: ProgressStore
+
+    var body: some View {
+        NightBackground {
+            VStack(spacing: 16) {
+                ScreenHeader(title: "NIGHT GARAGE", subtitle: "\(store.progress.currency) coins available") { model.screen = .menu }
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 245), spacing: 14)], spacing: 14) {
+                        ForEach(UpgradeKind.allCases) { kind in
+                            upgradeCard(kind)
+                        }
+                        ForEach(WeaponKind.allCases) { weapon in
+                            unlockCard(title: weapon.title, detail: "Weapon • \(weapon.unlockCost) coins", icon: weapon.icon, unlocked: store.progress.isUnlocked(weapon)) {
+                                _ = store.unlock(weapon)
+                            }
+                        }
+                        ForEach(TrapKind.allCases) { trap in
+                            unlockCard(title: trap.title, detail: "Trap • \(trap.unlockCost) coins", icon: trap.icon, unlocked: store.progress.isUnlocked(trap)) {
+                                _ = store.unlock(trap)
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(32)
+        }
+    }
+
+    private func upgradeCard(_ kind: UpgradeKind) -> some View {
+        let level = store.progress.upgradeLevel(kind)
+        let cost = kind.cost(forNextLevel: level)
+        return Button { _ = store.buyUpgrade(kind) } label: {
+            cardContent(title: kind.title, detail: kind.detail, footer: level >= 3 ? "MAX LEVEL" : "LEVEL \(level) • \(cost) COINS", icon: kind.icon)
+        }
+        .buttonStyle(.plain)
+        .disabled(level >= 3 || store.progress.currency < cost)
+        .opacity(level >= 3 || store.progress.currency >= cost ? 1 : 0.55)
+    }
+
+    private func unlockCard(title: String, detail: String, icon: String, unlocked: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            cardContent(title: title, detail: detail, footer: unlocked ? "UNLOCKED" : "TAP TO UNLOCK", icon: icon)
+        }
+        .buttonStyle(.plain)
+        .disabled(unlocked)
+        .opacity(unlocked ? 0.72 : 1)
+    }
+
+    private func cardContent(title: String, detail: String, footer: String, icon: String) -> some View {
+        HStack(spacing: 15) {
+            Image(systemName: icon).font(.title).foregroundStyle(.orange).frame(width: 42)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.headline.weight(.black))
+                Text(detail).font(.caption).foregroundStyle(.white.opacity(0.62))
+                Text(footer).font(.caption2.weight(.black)).foregroundStyle(.cyan)
+            }
+            Spacer()
+        }
+        .foregroundStyle(.white)
+        .padding(16)
+        .frame(minHeight: 100)
+        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(.white.opacity(0.14)))
+    }
+}
+
+private struct SettingsView: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var store: ProgressStore
+    @State private var confirmsReset = false
+
+    var body: some View {
+        NightBackground {
+            VStack(spacing: 16) {
+                ScreenHeader(title: "SETTINGS", subtitle: "Tune the night shift") { model.screen = .menu }
+                VStack(spacing: 0) {
+                    settingToggle("Music", icon: "music.note", keyPath: \.musicEnabled)
+                    settingToggle("Sound Effects", icon: "speaker.wave.2.fill", keyPath: \.soundEnabled)
+                    settingToggle("Haptics", icon: "waveform.path", keyPath: \.hapticsEnabled)
+                    settingToggle("Reduced Motion", icon: "figure.walk.motion", keyPath: \.reducedMotion)
+                    settingToggle("High Contrast", icon: "circle.lefthalf.filled", keyPath: \.highContrast)
+                }
+                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 22))
+                .frame(maxWidth: 560)
+                Button("RESET ALL PROGRESS", role: .destructive) { confirmsReset = true }
+                    .font(.caption.weight(.black))
+                    .padding(.top, 4)
+                Text("GraveFlick uses no analytics, advertising identifiers, accounts, or network tracking.")
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.54))
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 520)
+            }
+            .padding(32)
+        }
+        .alert("Reset all progress?", isPresented: $confirmsReset) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reset", role: .destructive) { store.resetAll() }
+        } message: {
+            Text("Levels, high scores, upgrades, and coins will be erased from this device.")
+        }
+    }
+
+    private func settingToggle(_ title: String, icon: String, keyPath: WritableKeyPath<GameSettings, Bool>) -> some View {
+        Toggle(isOn: Binding(
+            get: { store.settings[keyPath: keyPath] },
+            set: { value in
+                store.settings[keyPath: keyPath] = value
+                SoundManager.shared.apply(store.settings)
+            }
+        )) {
+            Label(title, systemImage: icon).font(.headline)
+        }
+        .tint(.orange)
+        .foregroundStyle(.white)
+        .padding(.horizontal, 20)
+        .frame(height: 54)
+    }
+}
+
+private struct GameContainerView: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject var session: GameSessionModel
+    @ObservedObject var store: ProgressStore
+
+    var body: some View {
+        ZStack {
+            SpriteView(scene: session.scene, options: [.ignoresSiblingOrder])
+                .ignoresSafeArea()
+
+            VStack(spacing: 0) {
+                gameplayHUD
+                Spacer()
+                actionBar
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+
+            if session.showsTutorial { tutorial }
+            if session.isPaused { pauseModal }
+            if let result = session.result { resultModal(result) }
+        }
+        .background(Color.black)
+    }
+
+    private var gameplayHUD: some View {
+        HStack(spacing: 10) {
+            Button { session.togglePause() } label: { Image(systemName: "pause.fill") }
+                .hudButton()
+            stat("SCORE", "\(session.score)", icon: "star.fill", color: .yellow)
+            stat("WAVE", "\(session.wave)/\(session.level.totalWaves)", icon: "moon.stars.fill", color: .cyan)
+            stat("DINER", String(repeating: "♥", count: session.health), icon: "heart.fill", color: .red)
+            Spacer()
+            Button { session.useSpecial() } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "hourglass.bottomhalf.filled")
+                    Text(session.specialCharge >= 1 ? "GRAVE TIME" : "\(Int(session.specialCharge * 100))%")
+                }
+            }
+            .hudButton(active: session.specialCharge >= 1)
+            .disabled(session.specialCharge < 1)
+            .accessibilityLabel("Grave Time special ability, \(Int(session.specialCharge * 100)) percent charged")
+        }
+    }
+
+    private var actionBar: some View {
+        HStack(spacing: 10) {
+            Text("WEAPONS").font(.caption2.weight(.black)).foregroundStyle(.white.opacity(0.55))
+            ForEach(WeaponKind.allCases.filter { session.progress.isUnlocked($0) }) { weapon in
+                cooldownButton(title: weapon.title, icon: weapon.icon, remaining: session.weaponCooldowns[weapon, default: 0]) { session.use(weapon) }
+            }
+            Spacer()
+            Text("TRAPS").font(.caption2.weight(.black)).foregroundStyle(.white.opacity(0.55))
+            ForEach(TrapKind.allCases.filter { session.progress.isUnlocked($0) }) { trap in
+                cooldownButton(title: trap.title, icon: trap.icon, remaining: session.trapCooldowns[trap, default: 0]) { session.use(trap) }
+            }
+        }
+    }
+
+    private func cooldownButton(title: String, icon: String, remaining: TimeInterval, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Image(systemName: icon).font(.headline)
+                Text(remaining > 0 ? "\(Int(ceil(remaining)))" : title.uppercased())
+                    .font(.system(size: 8, weight: .black))
+                    .lineLimit(1)
+            }
+            .frame(minWidth: 62, minHeight: 46)
+        }
+        .hudButton(active: remaining <= 0)
+        .disabled(remaining > 0)
+        .accessibilityLabel("\(title), \(remaining > 0 ? "ready in \(Int(ceil(remaining))) seconds" : "ready")")
+    }
+
+    private func stat(_ label: String, _ value: String, icon: String, color: Color) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: icon).foregroundStyle(color)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(label).font(.system(size: 8, weight: .black)).foregroundStyle(.white.opacity(0.55))
+                Text(value).font(.system(size: 15, weight: .black, design: .rounded)).foregroundStyle(.white)
+            }
+        }
+        .padding(.horizontal, 11)
+        .frame(height: 42)
+        .background(.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 13))
+    }
+
+    private var tutorial: some View {
+        ModalCard {
+            Text("YOUR FIRST NIGHT").font(.title.weight(.black))
+            HStack(spacing: 24) {
+                tutorialStep("1", "GRAB", "Touch and hold any creature")
+                tutorialStep("2", "FLICK", "Drag quickly and release")
+                tutorialStep("3", "SLAM", "Use height and pavement impact")
+            }
+            Text("Weapons and traps recharge automatically. Defeats charge Grave Time.")
+                .font(.caption).foregroundStyle(.white.opacity(0.65))
+            Button("START NIGHT") { session.dismissTutorial(store: store) }
+                .buttonStyle(.borderedProminent).tint(.orange).controlSize(.large)
+        }
+    }
+
+    private func tutorialStep(_ number: String, _ title: String, _ detail: String) -> some View {
+        VStack(spacing: 6) {
+            Text(number).font(.title2.weight(.black)).foregroundStyle(.orange)
+            Text(title).font(.headline.weight(.black))
+            Text(detail).font(.caption).foregroundStyle(.white.opacity(0.62)).multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: 150)
+    }
+
+    private var pauseModal: some View {
+        ModalCard {
+            Text("NIGHT SHIFT PAUSED").font(.title.weight(.black))
+            Button("RESUME") { session.togglePause() }.buttonStyle(.borderedProminent).tint(.orange)
+            Button("RETURN TO DINER") { model.leaveGame() }.buttonStyle(.bordered)
+        }
+    }
+
+    private func resultModal(_ result: LevelResult) -> some View {
+        ModalCard {
+            Text(result.won ? "LOT CLEARED" : "DINER OVERRUN").font(.title.weight(.black))
+            Text(String(repeating: "★", count: result.stars) + String(repeating: "☆", count: 3 - result.stars))
+                .font(.largeTitle).foregroundStyle(.yellow)
+            Text("SCORE \(result.score)  •  +\(result.reward) COINS")
+                .font(.headline.weight(.black)).foregroundStyle(.white.opacity(0.72))
+            HStack {
+                Button("LEVELS") { model.screen = .levels; model.session = nil }.buttonStyle(.bordered)
+                if result.won, result.levelID < GameLevel.all.count {
+                    Button("NEXT NIGHT") { model.start(GameLevel.all[result.levelID]) }
+                        .buttonStyle(.borderedProminent).tint(.orange)
+                } else {
+                    Button("TRY AGAIN") { model.start(session.level) }
+                        .buttonStyle(.borderedProminent).tint(.orange)
+                }
+            }
+        }
+    }
+}
+
+private struct NightBackground<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+    var body: some View {
+        ZStack {
+            LinearGradient(colors: [Color(red: 0.025, green: 0.035, blue: 0.085), Color(red: 0.12, green: 0.055, blue: 0.10)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                .ignoresSafeArea()
+            Circle().fill(Color.cyan.opacity(0.09)).frame(width: 420).blur(radius: 70).offset(x: 320, y: -160)
+            content()
+        }
+        .foregroundStyle(.white)
+    }
+}
+
+private struct ScreenHeader: View {
+    let title: String
+    let subtitle: String
+    let back: () -> Void
+    var body: some View {
+        HStack {
+            Button(action: back) { Image(systemName: "chevron.left").font(.title2.weight(.black)) }.hudButton()
+            VStack(alignment: .leading) {
+                Text(title).font(.largeTitle.weight(.black))
+                Text(subtitle).foregroundStyle(.white.opacity(0.58))
+            }
+            Spacer()
+        }
+    }
+}
+
+private struct MenuButton: View {
+    let title: String
+    let icon: String
+    let color: Color
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            HStack {
+                Image(systemName: icon).frame(width: 30)
+                Text(title).font(.headline.weight(.black)).tracking(1.5)
+                Spacer()
+                Image(systemName: "chevron.right")
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 20)
+            .frame(height: 56)
+            .background(color.opacity(0.30), in: RoundedRectangle(cornerRadius: 17))
+            .overlay(RoundedRectangle(cornerRadius: 17).stroke(color.opacity(0.7)))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct ModalCard<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.67).ignoresSafeArea()
+            VStack(spacing: 17) { content() }
+                .foregroundStyle(.white)
+                .padding(32)
+                .background(Color(red: 0.07, green: 0.08, blue: 0.14), in: RoundedRectangle(cornerRadius: 26))
+                .overlay(RoundedRectangle(cornerRadius: 26).stroke(.white.opacity(0.18)))
+                .shadow(radius: 30)
+        }
+    }
+}
+
+private extension View {
+    func hudButton(active: Bool = true) -> some View {
+        self
+            .foregroundStyle(active ? Color.white : Color.white.opacity(0.46))
+            .padding(.horizontal, 13)
+            .frame(minHeight: 42)
+            .background(active ? Color.orange.opacity(0.72) : Color.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 13))
+            .overlay(RoundedRectangle(cornerRadius: 13).stroke(.white.opacity(0.18)))
+            .buttonStyle(.plain)
+    }
+}

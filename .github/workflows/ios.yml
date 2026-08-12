@@ -14,12 +14,11 @@ jobs:
         run: brew install xcodegen
       - name: Generate Xcode project
         run: xcodegen generate
-      - name: Compile app and tests
+      - name: Build and run tests
         run: >-
-          xcodebuild build-for-testing
+          xcodebuild test
           -project GraveFlick.xcodeproj
           -scheme GraveFlick
           -configuration Debug
-          -destination 'generic/platform=iOS Simulator'
+          -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=latest'
           CODE_SIGNING_ALLOWED=NO
-
