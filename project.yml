@@ -6,7 +6,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.10"
-    DEVELOPMENT_TEAM: ""
+    DEVELOPMENT_TEAM: GPKK39R82X
 targets:
   GraveFlick:
     type: application
@@ -20,7 +20,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.bahlcorp.graveflick
         PRODUCT_NAME: GraveFlick
         MARKETING_VERSION: 0.2.0
-        CURRENT_PROJECT_VERSION: 2
+        CURRENT_PROJECT_VERSION: 3
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: GraveFlick
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES

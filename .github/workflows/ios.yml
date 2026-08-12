@@ -4,6 +4,13 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      upload_testflight:
+        description: "Build, sign, and upload build 3 to TestFlight"
+        required: true
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -22,3 +29,61 @@ jobs:
           -configuration Debug
           -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=latest'
           CODE_SIGNING_ALLOWED=NO
+
+  testflight:
+    name: TestFlight build 3
+    if: github.event_name == 'workflow_dispatch' && inputs.upload_testflight
+    needs: build
+    runs-on: macos-15
+    timeout-minutes: 45
+    concurrency:
+      group: graveflick-testflight
+      cancel-in-progress: false
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      BUILD_NUMBER: "3"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate release secrets
+        shell: bash
+        run: |
+          missing=()
+          for name in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_CONTENT APPLE_TEAM_ID; do
+            if [ -z "${!name:-}" ]; then missing+=("$name"); fi
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Missing required repository secrets: ${missing[*]}"
+            exit 1
+          fi
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Set up Ruby and Fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          bundler-cache: true
+      - name: Generate Xcode project
+        run: xcodegen generate
+      - name: Verify release identity
+        run: |
+          BUNDLE_ID=$(xcodebuild -project GraveFlick.xcodeproj -scheme GraveFlick \
+            -showBuildSettings | awk '/PRODUCT_BUNDLE_IDENTIFIER/ { print $3; exit }')
+          echo "Release bundle identifier: $BUNDLE_ID"
+          if [ "$BUNDLE_ID" != "com.bahlcorp.graveflick" ]; then
+            echo "::error::Expected com.bahlcorp.graveflick"
+            exit 1
+          fi
+      - name: Archive, sign, and upload
+        run: bundle exec fastlane ios beta
+      - name: Upload signed archive artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: GraveFlick-TestFlight-3
+          path: |
+            build/GraveFlick.ipa
+            build/GraveFlick.app.dSYM.zip
+          if-no-files-found: ignore
+          retention-days: 14

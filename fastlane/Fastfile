@@ -1,0 +1,61 @@
+require "base64"
+
+default_platform(:ios)
+
+platform :ios do
+  desc "Archive, sign, and upload GraveFlick to TestFlight"
+  lane :beta do
+    setup_ci
+
+    required = %w[
+      ASC_KEY_ID
+      ASC_ISSUER_ID
+      ASC_KEY_CONTENT
+      APPLE_TEAM_ID
+      BUILD_NUMBER
+    ]
+    missing = required.select { |name| ENV[name].to_s.empty? }
+    UI.user_error!("Missing release environment: #{missing.join(', ')}") unless missing.empty?
+
+    api_key = app_store_connect_api_key(
+      key_id: ENV.fetch("ASC_KEY_ID"),
+      issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+      key_content: ENV.fetch("ASC_KEY_CONTENT"),
+      is_key_content_base64: true
+    )
+
+    key_path = File.expand_path("../asc_key.p8", __dir__)
+    File.binwrite(key_path, Base64.decode64(ENV.fetch("ASC_KEY_CONTENT")))
+
+    build_app(
+      project: "GraveFlick.xcodeproj",
+      scheme: "GraveFlick",
+      clean: true,
+      export_method: "app-store",
+      output_directory: "build",
+      output_name: "GraveFlick.ipa",
+      include_symbols: true,
+      export_options: {
+        signingStyle: "automatic",
+        teamID: ENV.fetch("APPLE_TEAM_ID")
+      },
+      xcargs: [
+        "-allowProvisioningUpdates",
+        "-authenticationKeyID #{ENV.fetch('ASC_KEY_ID')}",
+        "-authenticationKeyIssuerID #{ENV.fetch('ASC_ISSUER_ID')}",
+        "-authenticationKeyPath #{key_path}",
+        "DEVELOPMENT_TEAM=#{ENV.fetch('APPLE_TEAM_ID')}",
+        "CURRENT_PROJECT_VERSION=#{ENV.fetch('BUILD_NUMBER')}"
+      ].join(" ")
+    )
+
+    upload_to_testflight(
+      api_key: api_key,
+      app_identifier: "com.bahlcorp.graveflick",
+      skip_waiting_for_build_processing: false,
+      distribute_external: false
+    )
+  ensure
+    File.delete(key_path) if defined?(key_path) && key_path && File.exist?(key_path)
+  end
+end
