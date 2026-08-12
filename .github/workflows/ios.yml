@@ -70,7 +70,7 @@ jobs:
       - name: Verify release identity
         run: |
           BUNDLE_ID=$(xcodebuild -project GraveFlick.xcodeproj -scheme GraveFlick \
-            -showBuildSettings | awk '/PRODUCT_BUNDLE_IDENTIFIER/ { print $3; exit }')
+            -showBuildSettings | awk '$1 == "PRODUCT_BUNDLE_IDENTIFIER" { print $3; exit }')
           echo "Release bundle identifier: $BUNDLE_ID"
           if [ "$BUNDLE_ID" != "com.bahlcorp.graveflick" ]; then
             echo "::error::Expected com.bahlcorp.graveflick"
