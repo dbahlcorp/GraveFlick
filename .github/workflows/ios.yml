@@ -14,7 +14,7 @@ on:
 
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - name: Install XcodeGen
@@ -34,7 +34,7 @@ jobs:
     name: TestFlight build 3
     if: github.event_name == 'workflow_dispatch' && inputs.upload_testflight
     needs: build
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 45
     concurrency:
       group: graveflick-testflight
