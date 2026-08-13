@@ -46,4 +46,13 @@ final class GameRulesTests: XCTestCase {
             XCTAssertTrue(zombie.hasCompleteAnimationRig, "Missing articulated animation art for \(kind.rawValue)")
         }
     }
+
+    func testDinerHasCompleteAnimatedAsset() {
+        let diner = DinerNode(
+            frame: CGRect(x: 0, y: 0, width: 260, height: 250),
+            reducedMotion: true,
+            highContrast: false
+        )
+        XCTAssertTrue(diner.hasCompleteAssetSet)
+    }
 }
