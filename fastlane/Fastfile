@@ -1,4 +1,6 @@
 require "base64"
+require "fileutils"
+require "shellwords"
 
 default_platform(:ios)
 
@@ -49,9 +51,13 @@ platform :ios do
       ].join(" ")
     )
 
-    sh("rm -rf build/ipa-check && mkdir -p build/ipa-check")
-    sh("unzip -q build/GraveFlick.ipa -d build/ipa-check")
-    app_path = "build/ipa-check/Payload/GraveFlick.app"
+    ipa_path = lane_context[SharedValues::IPA_OUTPUT_PATH]
+    UI.user_error!("Fastlane did not report an IPA output path") if ipa_path.to_s.empty?
+    check_dir = File.join(File.dirname(ipa_path), "ipa-check")
+    FileUtils.rm_rf(check_dir)
+    FileUtils.mkdir_p(check_dir)
+    sh("unzip -q #{Shellwords.escape(ipa_path)} -d #{Shellwords.escape(check_dir)}")
+    app_path = File.join(check_dir, "Payload", "GraveFlick.app")
     UI.user_error!("Archive is missing compiled asset catalog") unless File.exist?(File.join(app_path, "Assets.car"))
     UI.user_error!("Archive is missing the 120x120 iPhone icon") unless Dir.glob(File.join(app_path, "AppIcon60x60@2x.png")).any?
     sh("/usr/libexec/PlistBuddy -c 'Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName' '#{app_path}/Info.plist' | grep -qx AppIcon")
