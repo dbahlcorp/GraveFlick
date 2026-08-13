@@ -361,31 +361,42 @@ private struct UpgradeShopView: View {
 private struct SettingsView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var store: ProgressStore
-    @State private var confirmsReset = false
 
     var body: some View {
         NightBackground {
             VStack(spacing: 16) {
                 ScreenHeader(title: "SETTINGS", subtitle: "Tune the night shift") { model.screen = .menu }
-                VStack(spacing: 0) {
-                    settingToggle("Music", icon: "music.note", keyPath: \.musicEnabled)
-                    settingToggle("Sound Effects", icon: "speaker.wave.2.fill", keyPath: \.soundEnabled)
-                    settingToggle("Haptics", icon: "waveform.path", keyPath: \.hapticsEnabled)
-                    settingToggle("Reduced Motion", icon: "figure.walk.motion", keyPath: \.reducedMotion)
-                    settingToggle("High Contrast", icon: "circle.lefthalf.filled", keyPath: \.highContrast)
-                }
-                .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 22))
-                .frame(maxWidth: 560)
-                Button("RESET ALL PROGRESS", role: .destructive) { confirmsReset = true }
-                    .font(.caption.weight(.black))
-                    .padding(.top, 4)
-                Text("GraveFlick uses no analytics, advertising identifiers, accounts, or network tracking.")
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.54))
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 520)
+                SettingsPanel(store: store)
             }
             .padding(32)
+        }
+    }
+}
+
+/// Shared settings controls, reused by the main-menu SettingsView and the in-game pause modal
+/// so players can retune audio/accessibility options without abandoning a run.
+private struct SettingsPanel: View {
+    @ObservedObject var store: ProgressStore
+    @State private var confirmsReset = false
+
+    var body: some View {
+        VStack(spacing: 16) {
+            VStack(spacing: 0) {
+                settingToggle("Music", icon: "music.note", keyPath: \.musicEnabled)
+                settingToggle("Sound Effects", icon: "speaker.wave.2.fill", keyPath: \.soundEnabled)
+                settingToggle("Haptics", icon: "waveform.path", keyPath: \.hapticsEnabled)
+                settingToggle("Reduced Motion", icon: "figure.walk.motion", keyPath: \.reducedMotion)
+                settingToggle("High Contrast", icon: "circle.lefthalf.filled", keyPath: \.highContrast)
+            }
+            .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 22))
+            .frame(maxWidth: 560)
+            Button("RESET ALL PROGRESS", role: .destructive) { confirmsReset = true }
+                .font(.caption.weight(.black))
+            Text("GraveFlick uses no analytics, advertising identifiers, accounts, or network tracking.")
+                .font(.caption)
+                .foregroundStyle(.white.opacity(0.54))
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 520)
         }
         .alert("Reset all progress?", isPresented: $confirmsReset) {
             Button("Cancel", role: .cancel) {}
@@ -416,11 +427,15 @@ private struct GameContainerView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var session: GameSessionModel
     @ObservedObject var store: ProgressStore
+    @State private var showsSettings = false
+    @State private var lowHealthPulse = false
 
     var body: some View {
         ZStack {
             SpriteView(scene: session.scene, options: [.ignoresSiblingOrder])
                 .ignoresSafeArea()
+
+            if session.health == 1, session.result == nil { lowHealthVignette }
 
             VStack(spacing: 0) {
                 gameplayHUD
@@ -431,10 +446,29 @@ private struct GameContainerView: View {
             .padding(.vertical, 12)
 
             if session.showsTutorial { tutorial }
-            if session.isPaused { pauseModal }
+            if session.isPaused {
+                if showsSettings { settingsModal } else { pauseModal }
+            }
             if let result = session.result { resultModal(result) }
         }
         .background(Color.black)
+    }
+
+    private var lowHealthVignette: some View {
+        RadialGradient(colors: [.clear, Color.red.opacity(0.55)], center: .center, startRadius: 160, endRadius: 520)
+            .ignoresSafeArea()
+            .opacity(lowHealthPulse ? 0.85 : 0.32)
+            .allowsHitTesting(false)
+            .animation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true), value: lowHealthPulse)
+            .onAppear { lowHealthPulse = true }
+            .task {
+                // Loops for as long as this view is on screen; SwiftUI cancels it automatically
+                // once health rises above 1 (level restart) or the diner falls (view disappears).
+                while !Task.isCancelled {
+                    SoundManager.shared.play(.heartbeat)
+                    try? await Task.sleep(nanoseconds: 900_000_000)
+                }
+            }
     }
 
     private var gameplayHUD: some View {
@@ -461,29 +495,50 @@ private struct GameContainerView: View {
         HStack(spacing: 10) {
             Text("WEAPONS").font(.caption2.weight(.black)).foregroundStyle(.white.opacity(0.55))
             ForEach(WeaponKind.allCases.filter { session.progress.isUnlocked($0) }) { weapon in
-                cooldownButton(title: weapon.title, icon: weapon.icon, remaining: session.weaponCooldowns[weapon, default: 0]) { session.use(weapon) }
+                CooldownButton(title: weapon.title, icon: weapon.icon, remaining: session.weaponCooldowns[weapon, default: 0]) { session.use(weapon) }
             }
             Spacer()
             Text("TRAPS").font(.caption2.weight(.black)).foregroundStyle(.white.opacity(0.55))
             ForEach(TrapKind.allCases.filter { session.progress.isUnlocked($0) }) { trap in
-                cooldownButton(title: trap.title, icon: trap.icon, remaining: session.trapCooldowns[trap, default: 0]) { session.use(trap) }
+                CooldownButton(title: trap.title, icon: trap.icon, remaining: session.trapCooldowns[trap, default: 0]) { session.use(trap) }
             }
         }
     }
 
-    private func cooldownButton(title: String, icon: String, remaining: TimeInterval, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 2) {
-                Image(systemName: icon).font(.headline)
-                Text(remaining > 0 ? "\(Int(ceil(remaining)))" : title.uppercased())
-                    .font(.system(size: 8, weight: .black))
-                    .lineLimit(1)
+    /// A pop animation + audible ping fires exactly once when `remaining` crosses from cooling
+    /// down to ready, so recharged weapons/traps grab attention instead of going unnoticed.
+    private struct CooldownButton: View {
+        let title: String
+        let icon: String
+        let remaining: TimeInterval
+        let action: () -> Void
+        @State private var poppedReady = false
+
+        var body: some View {
+            Button(action: action) {
+                VStack(spacing: 2) {
+                    Image(systemName: icon).font(.headline)
+                    Text(remaining > 0 ? "\(Int(ceil(remaining)))" : title.uppercased())
+                        .font(.system(size: 8, weight: .black))
+                        .lineLimit(1)
+                }
+                .frame(minWidth: 62, minHeight: 46)
             }
-            .frame(minWidth: 62, minHeight: 46)
+            .hudButton(active: remaining <= 0)
+            .disabled(remaining > 0)
+            .scaleEffect(poppedReady ? 1.16 : 1)
+            .animation(.spring(response: 0.25, dampingFraction: 0.45), value: poppedReady)
+            .accessibilityLabel("\(title), \(remaining > 0 ? "ready in \(Int(ceil(remaining))) seconds" : "ready")")
+            .onChange(of: remaining) { oldValue, newValue in
+                guard oldValue > 0, newValue <= 0 else { return }
+                SoundManager.shared.play(.ready)
+                poppedReady = true
+                Task {
+                    try? await Task.sleep(nanoseconds: 180_000_000)
+                    poppedReady = false
+                }
+            }
         }
-        .hudButton(active: remaining <= 0)
-        .disabled(remaining > 0)
-        .accessibilityLabel("\(title), \(remaining > 0 ? "ready in \(Int(ceil(remaining))) seconds" : "ready")")
     }
 
     private func stat(_ label: String, _ value: String, icon: String, color: Color) -> some View {
@@ -527,7 +582,16 @@ private struct GameContainerView: View {
         ModalCard {
             Text("NIGHT SHIFT PAUSED").font(.title.weight(.black))
             Button("RESUME") { session.togglePause() }.buttonStyle(.borderedProminent).tint(.orange)
+            Button("SETTINGS") { showsSettings = true }.buttonStyle(.bordered)
             Button("RETURN TO DINER") { model.leaveGame() }.buttonStyle(.bordered)
+        }
+    }
+
+    private var settingsModal: some View {
+        ModalCard {
+            Text("SETTINGS").font(.title.weight(.black))
+            SettingsPanel(store: store)
+            Button("DONE") { showsSettings = false }.buttonStyle(.borderedProminent).tint(.orange)
         }
     }
 
