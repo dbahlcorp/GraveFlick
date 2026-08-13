@@ -627,13 +627,14 @@ final class ZombieNode: SKNode {
             case .volatile: 1.22
             default: 1
             }
-            let force: CGFloat = kindForce * (switch style {
+            let styleForce: CGFloat = switch style {
             case .explosion: 1.9
             case .weapon: 1.45
             case .trap: 0.72
             case .dinerAttack: 0.45
             default: 1
-            })
+            }
+            let force = kindForce * styleForce
             let horizontal = styleDirection * CGFloat(24 + index * 7) * force
             let vertical = CGFloat(18 + (index % 3) * 12) * force
             let scatter = reducedMotion ? SKAction.wait(forDuration: 0) : .group([
