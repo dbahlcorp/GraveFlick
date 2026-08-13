@@ -232,10 +232,15 @@ final class ZombieNode: SKNode {
             ]
         } else {
             let lean: CGFloat = kind == .runner ? -0.12 : (kind == .brute ? 0.03 : -0.035)
+            let backShoulderX: CGFloat = switch kind {
+            case .brute, .armored, .volatile: -torsoWidth * 0.30
+            case .runner: -torsoWidth * 0.16
+            default: torsoWidth * 0.03
+            }
             restPose = [
                 .torso: PartPose(position: CGPoint(x: 0, y: kind.size.height * 0.02), rotation: lean),
                 .head: PartPose(position: CGPoint(x: torsoWidth * 0.17, y: torsoHeight * 0.38), rotation: lean * 0.45),
-                .backArm: PartPose(position: CGPoint(x: torsoWidth * 0.03, y: torsoHeight * 0.30), rotation: kind == .runner ? 0.38 : 0.10),
+                .backArm: PartPose(position: CGPoint(x: backShoulderX, y: torsoHeight * 0.30), rotation: kind == .runner ? 0.38 : 0.10),
                 .frontArm: PartPose(position: CGPoint(x: torsoWidth * 0.16, y: torsoHeight * 0.27), rotation: kind == .runner ? -0.18 : -0.05),
                 .backLeg: PartPose(position: CGPoint(x: -torsoWidth * 0.17, y: -torsoHeight * 0.31), rotation: kind == .runner ? 0.16 : 0.05),
                 .frontLeg: PartPose(position: CGPoint(x: torsoWidth * 0.10, y: -torsoHeight * 0.32), rotation: kind == .runner ? -0.17 : -0.03)
