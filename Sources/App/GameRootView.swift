@@ -13,6 +13,7 @@ final class AppModel: ObservableObject {
 
     init() {
         SoundManager.shared.apply(store.settings)
+        GameCenterManager.shared.authenticate()
     }
 
     func start(_ level: GameLevel) {
@@ -77,6 +78,7 @@ final class GameSessionModel: ObservableObject, GameSceneDelegate {
         self.result = result
         isPaused = false
         completion(result)
+        GameCenterManager.shared.report(result, achievements: progress.achievements)
     }
 
     func togglePause() {
@@ -175,7 +177,7 @@ private struct MainMenuView: View {
                             .foregroundStyle(.white.opacity(0.72))
                             .multilineTextAlignment(.center)
                         MenuButton(title: "PLAY", icon: "ui_play", color: .orange) {
-                            model.start(GameLevel.all[max(0, store.progress.highestUnlockedLevel - 1)])
+                            model.start(GameLevel.campaign[max(0, min(GameLevel.campaign.count - 1, store.progress.highestUnlockedLevel - 1))])
                         }
                         MenuButton(title: "LEVELS", icon: "ui_levels", color: .cyan) { model.screen = .levels }
                         MenuButton(title: "SURVIVAL", icon: "ui_survival", color: .red) { model.start(GameLevel.endless) }
@@ -227,6 +229,10 @@ private struct CreditsView: View {
         ("combo_8", "Eight on the Floor", "Reach an eight-hit combo"),
         ("score_5000", "Neon Scoreboard", "Score 5,000 in one night"),
         ("last_light", "Still Glowing", "Clear the final night")
+        ,("road_cleared", "Road Cleared", "Clear all 25 campaign nights")
+        ,("survival_20", "Long Night", "Reach survival wave 20")
+        ,("combo_20", "Floor Is Lava", "Reach a twenty-hit combo")
+        ,("century", "Closing Crew", "Defeat 100 enemies in one shift")
     ]
 
     var body: some View {
@@ -279,10 +285,10 @@ private struct LevelSelectView: View {
     var body: some View {
         NightBackground {
             VStack(spacing: 10) {
-                ScreenHeader(title: "NIGHT ROUTE", subtitle: "Five stops. One glowing diner.") { model.screen = .menu }
+                ScreenHeader(title: "NIGHT ROUTE", subtitle: "Twenty-five shifts across eight haunted stops.") { model.screen = .menu }
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 16) {
-                        ForEach(GameLevel.all) { level in
+                        ForEach(GameLevel.campaign) { level in
                             let unlocked = level.id <= store.progress.highestUnlockedLevel
                             Button {
                                 if unlocked { model.start(level) }
@@ -592,8 +598,12 @@ private struct GameContainerView: View {
         HStack(spacing: 8) {
             if session.level.isSandbox { sandboxControls }
             Text("WEAPONS").font(.caption2.weight(.black)).foregroundStyle(.white.opacity(0.55))
-            ForEach(WeaponKind.allCases.filter { (session.level.isSandbox || session.progress.isUnlocked($0)) && (session.level.modifier != .limitedWeapons || $0 == .bowlingBall) }) { weapon in
-                CooldownButton(title: weapon.title, icon: weapon.icon, remaining: session.weaponCooldowns[weapon, default: 0]) { session.use(weapon) }
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 7) {
+                    ForEach(WeaponKind.allCases.filter { (session.level.isSandbox || session.progress.isUnlocked($0)) && (session.level.modifier != .limitedWeapons || $0 == .bowlingBall) }) { weapon in
+                        CooldownButton(title: weapon.title, icon: weapon.icon, remaining: session.weaponCooldowns[weapon, default: 0]) { session.use(weapon) }
+                    }
+                }
             }
             Spacer()
             Text("TRAPS").font(.caption2.weight(.black)).foregroundStyle(.white.opacity(0.55))
@@ -608,8 +618,23 @@ private struct GameContainerView: View {
 
     private var sandboxControls: some View {
         Menu {
+            Section("Spawn Count") {
+                ForEach([1, 3, 6, 12], id: \.self) { count in Button("\(count) AT ONCE") { session.scene.sandboxSetBurst(count) } }
+            }
+            Section("Simulation Speed") {
+                Button("SLOW 0.5×") { session.scene.sandboxSetSpeed(0.5) }
+                Button("NORMAL 1×") { session.scene.sandboxSetSpeed(1) }
+                Button("CHAOS 2.5×") { session.scene.sandboxSetSpeed(2.5) }
+            }
+            Section("Gravity") {
+                Button("MOON") { session.scene.sandboxSetGravity(-3.2) }
+                Button("NORMAL") { session.scene.sandboxSetGravity(-8.8) }
+                Button("HEAVY") { session.scene.sandboxSetGravity(-16) }
+            }
+            Section("Enemies") {
             ForEach(ZombieKind.allCases, id: \.rawValue) { kind in
                 Button(kind.displayName) { session.scene.sandboxSpawn(kind) }
+            }
             }
             Divider()
             Button("CLEAR LOT", role: .destructive) { session.scene.sandboxClear() }
@@ -755,8 +780,8 @@ private struct GameContainerView: View {
                 .font(.headline.weight(.black)).foregroundStyle(.white.opacity(0.72))
             HStack {
                 Button("LEVELS") { model.screen = .levels; model.session = nil }.buttonStyle(.bordered)
-                if result.won, result.levelID < GameLevel.all.count {
-                    Button("NEXT NIGHT") { model.start(GameLevel.all[result.levelID]) }
+                if result.won, result.levelID < GameLevel.campaign.count {
+                    Button("NEXT NIGHT") { model.start(GameLevel.campaign[result.levelID]) }
                         .buttonStyle(.borderedProminent).tint(.orange)
                 } else {
                     Button("TRY AGAIN") { model.start(session.level) }

@@ -5,7 +5,7 @@ final class SoundManager {
     static let shared = SoundManager()
 
     enum Effect {
-        case grab, impact, defeat, dinerHit, weapon, trap, pickup, victory, ready, heartbeat
+        case grab, impact, defeat, dinerHit, weapon, trap, pickup, victory, ready, heartbeat, zombieVoice, bossRoar
     }
 
     private struct ToneSpec {
@@ -64,6 +64,13 @@ final class SoundManager {
         musicNode.play()
     }
 
+    func playBossLayer(phase: Int) {
+        guard settings.musicEnabled else { return }
+        let notes = phase >= 3 ? [82.41, 55, 98] : [65.41, 73.42, 55]
+        guard let node = effectNodes.first(where: { !$0.isPlaying }), let buffer = fanfare(notes: notes, noteDuration: 0.16, volume: 0.11) else { return }
+        node.scheduleBuffer(buffer); node.play()
+    }
+
     /// - Parameter comboScale: raises the pitch a semitone-ish step per combo hit, the classic
     ///   escalating-reward cue for chained defeats. Ignored by effects that aren't combo-driven.
     func play(_ effect: Effect, comboScale: Int = 1) {
@@ -78,6 +85,10 @@ final class SoundManager {
             buffer = fanfare(notes: [659.25, 987.77], noteDuration: 0.07, volume: 0.13)
         case .heartbeat:
             buffer = heartbeatPulse()
+        case .bossRoar:
+            buffer = tone(ToneSpec(frequency: 68, duration: 0.62, volume: 0.26, pitchSweep: 0.52, noiseMix: 0.48))
+        case .zombieVoice:
+            buffer = tone(ToneSpec(frequency: 115, duration: 0.28, volume: 0.13, pitchSweep: 0.72, noiseMix: 0.36))
         default:
             var toneSpec = spec(for: effect)
             if effect == .defeat {
@@ -102,7 +113,7 @@ final class SoundManager {
         case .weapon: ToneSpec(frequency: 640, duration: 0.16, volume: 0.15, pitchSweep: 1.4, noiseMix: 0.06)
         case .trap: ToneSpec(frequency: 320, duration: 0.18, volume: 0.13, pitchSweep: 0.85, noiseMix: 0.10)
         case .ready: ToneSpec(frequency: 880, duration: 0.05, volume: 0.09, pitchSweep: 1.15, noiseMix: 0, detune: false)
-        case .pickup, .victory, .heartbeat: ToneSpec(frequency: 660, duration: 0.1, volume: 0.13)
+        case .pickup, .victory, .heartbeat, .zombieVoice, .bossRoar: ToneSpec(frequency: 660, duration: 0.1, volume: 0.13)
         }
     }
 

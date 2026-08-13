@@ -57,7 +57,7 @@ enum GameRules {
         return switch levelID {
         case 4: .butcher
         case 5: .colossus
-        default: nil
+        default: levelID > 5 && levelID.isMultiple(of: 5) ? (levelID.isMultiple(of: 10) ? .colossus : .butcher) : nil
         }
     }
 

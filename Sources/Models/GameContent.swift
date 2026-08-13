@@ -9,6 +9,11 @@ enum WeaponKind: String, CaseIterable, Codable, Identifiable {
     case grenade
     case propaneTank
     case wreckingBall
+    case sniper
+    case greaseFire
+    case transformer
+    case deliveryTruck
+    case meteor
 
     var id: String { rawValue }
     var title: String {
@@ -20,6 +25,11 @@ enum WeaponKind: String, CaseIterable, Codable, Identifiable {
         case .grenade: "Grave Grenade"
         case .propaneTank: "Propane Roller"
         case .wreckingBall: "Wrecking Ball"
+        case .sniper: "Deadeye Rifle"
+        case .greaseFire: "Grease Fire"
+        case .transformer: "Arc Transformer"
+        case .deliveryTruck: "Delivery Rush"
+        case .meteor: "Midnight Meteor"
         }
     }
     var icon: String {
@@ -27,8 +37,15 @@ enum WeaponKind: String, CaseIterable, Codable, Identifiable {
         case .bowlingBall: "weapon_bowling_ball"
         case .shotgun: "weapon_scatterblast"
         case .airstrike: "weapon_airstrike_beacon"
-        case .anvil, .wreckingBall: "weapon_bowling_ball"
-        case .grenade, .propaneTank: "weapon_airstrike_beacon"
+        case .anvil: "weapon_anvil"
+        case .grenade: "weapon_grenade"
+        case .propaneTank: "weapon_propane"
+        case .wreckingBall: "weapon_wrecking_ball"
+        case .sniper: "weapon_sniper"
+        case .greaseFire: "weapon_grease_fire"
+        case .transformer: "weapon_transformer"
+        case .deliveryTruck: "weapon_delivery_truck"
+        case .meteor: "weapon_airstrike_beacon"
         }
     }
     var cooldown: TimeInterval {
@@ -40,6 +57,11 @@ enum WeaponKind: String, CaseIterable, Codable, Identifiable {
         case .grenade: 15
         case .propaneTank: 18
         case .wreckingBall: 24
+        case .sniper: 9
+        case .greaseFire: 17
+        case .transformer: 21
+        case .deliveryTruck: 26
+        case .meteor: 34
         }
     }
     var unlockCost: Int {
@@ -51,6 +73,11 @@ enum WeaponKind: String, CaseIterable, Codable, Identifiable {
         case .grenade: 525
         case .propaneTank: 700
         case .wreckingBall: 1_100
+        case .sniper: 1_250
+        case .greaseFire: 1_400
+        case .transformer: 1_650
+        case .deliveryTruck: 1_900
+        case .meteor: 2_400
         }
     }
 }
@@ -148,6 +175,9 @@ struct GameLevel: Identifiable, Hashable {
         case 2: "freeway_hunger"
         case 3: "hard_hats"
         case 4: "pressure_cooker"
+        case 6: "campground"
+        case 7: "neon_motel"
+        case 8: "drive_in"
         default: "last_light"
         }
         return String(format: "environment_%02d_%@", visualID, slug)
@@ -194,6 +224,16 @@ struct GameLevel: Identifiable, Hashable {
         challenge(114, "Armored Closing", 3, .noGrab, [.armored, .riot]),
         challenge(115, "Last Light Gauntlet", 5, .doubleSided, ZombieKind.regularCases)
     ]
+
+    static let campaign: [GameLevel] = all + (6...25).map { mission in
+        let visualID = 6 + (mission - 6) % 3
+        let modifiers: [MissionModifier] = [.standard, .leftOnly, .rightOnly, .doubleSided, .noGrab, .volatileRush, .waitressRush, .limitedWeapons, .lowGravity, .suddenDeath]
+        let location = visualID == 6 ? "Camp Hollow" : (visualID == 7 ? "Neon Vacancy" : "Final Screening")
+        return GameLevel(id: mission, title: "\(location) \(mission - 5)", subtitle: modifiers[(mission - 6) % modifiers.count].title,
+                         totalWaves: min(8, 4 + (mission - 6) / 5), waveDuration: 17, baseSpawnInterval: max(0.72, 1.22 - Double(mission - 6) * 0.018),
+                         reward: 420 + mission * 35, enemyRoster: ZombieKind.regularCases, skyColor: color(5, 10, 25), horizonColor: color(22, 36, 52),
+                         environmentID: visualID, modifier: modifiers[(mission - 6) % modifiers.count])
+    }
 
     static let sandbox = GameLevel(
         id: -1, title: "Midnight Laboratory", subtitle: "Unlimited health and full control", totalWaves: .max,
@@ -254,6 +294,31 @@ struct PlayerProgress: Codable, Equatable {
     var dailyDefeats = 0
     var dailyClaimed = false
     var hasSeenTutorial = false
+    var totalDefeats = 0
+    var bestCombo = 0
+    var bossDefeats = 0
+
+    private enum CodingKeys: String, CodingKey { case currency, highestUnlockedLevel, highScores, stars, upgradeLevels, unlockedWeapons, unlockedTraps, achievements, dailyDate, dailyDefeats, dailyClaimed, hasSeenTutorial, totalDefeats, bestCombo, bossDefeats }
+
+    init() {}
+    init(from decoder: Decoder) throws {
+        let v = try decoder.container(keyedBy: CodingKeys.self)
+        currency = try v.decodeIfPresent(Int.self, forKey: .currency) ?? 350
+        highestUnlockedLevel = try v.decodeIfPresent(Int.self, forKey: .highestUnlockedLevel) ?? 1
+        highScores = try v.decodeIfPresent([Int: Int].self, forKey: .highScores) ?? [:]
+        stars = try v.decodeIfPresent([Int: Int].self, forKey: .stars) ?? [:]
+        upgradeLevels = try v.decodeIfPresent([String: Int].self, forKey: .upgradeLevels) ?? [:]
+        unlockedWeapons = try v.decodeIfPresent(Set<String>.self, forKey: .unlockedWeapons) ?? [WeaponKind.bowlingBall.rawValue]
+        unlockedTraps = try v.decodeIfPresent(Set<String>.self, forKey: .unlockedTraps) ?? []
+        achievements = try v.decodeIfPresent(Set<String>.self, forKey: .achievements) ?? []
+        dailyDate = try v.decodeIfPresent(String.self, forKey: .dailyDate) ?? ""
+        dailyDefeats = try v.decodeIfPresent(Int.self, forKey: .dailyDefeats) ?? 0
+        dailyClaimed = try v.decodeIfPresent(Bool.self, forKey: .dailyClaimed) ?? false
+        hasSeenTutorial = try v.decodeIfPresent(Bool.self, forKey: .hasSeenTutorial) ?? false
+        totalDefeats = try v.decodeIfPresent(Int.self, forKey: .totalDefeats) ?? 0
+        bestCombo = try v.decodeIfPresent(Int.self, forKey: .bestCombo) ?? 0
+        bossDefeats = try v.decodeIfPresent(Int.self, forKey: .bossDefeats) ?? 0
+    }
 
     func upgradeLevel(_ kind: UpgradeKind) -> Int { upgradeLevels[kind.rawValue, default: 0] }
     func upgradeLevel(_ kind: WeaponKind) -> Int { upgradeLevels["weapon.\(kind.rawValue)", default: 0] }

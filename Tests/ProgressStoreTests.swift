@@ -67,4 +67,13 @@ final class ProgressStoreTests: XCTestCase {
         XCTAssertEqual(store.progress.upgradeLevel(.flickTraining), 0)
         XCTAssertEqual(ProgressStore(defaults: defaults).progress.upgradeLevel(.bowlingBall), 1)
     }
+
+    func testLegacyProgressPayloadDecodesWithNewMasteryDefaults() throws {
+        let legacy = #"{"currency":900,"highestUnlockedLevel":3,"highScores":{},"stars":{},"upgradeLevels":{},"unlockedWeapons":["bowlingBall"],"unlockedTraps":[],"achievements":[],"dailyDate":"","dailyDefeats":0,"dailyClaimed":false,"hasSeenTutorial":true}"#
+        defaults.set(Data(legacy.utf8), forKey: "graveflick.progress.v1")
+        let progress = ProgressStore(defaults: defaults).progress
+        XCTAssertEqual(progress.currency, 900)
+        XCTAssertEqual(progress.totalDefeats, 0)
+        XCTAssertEqual(progress.bestCombo, 0)
+    }
 }

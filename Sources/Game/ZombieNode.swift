@@ -208,6 +208,7 @@ final class ZombieNode: SKNode {
     var onHealthChanged: ((CGFloat) -> Void)?
     private(set) var bossIsStunned = false
     private var bossStunDamage: CGFloat = 0
+    private(set) var bossPhase = 1
     private var abilityTime: TimeInterval = 0
 
     var currentAnimationState: ZombieAnimationState { state }
@@ -484,6 +485,18 @@ final class ZombieNode: SKNode {
         }
     }
 
+    func applyPinch(scale: CGFloat, rotation: CGFloat) {
+        guard isGrabbed, !isDefeated else { return }
+        rig.setScale(min(1.22, max(0.78, scale)))
+        rig.zRotation = min(0.65, max(-0.65, rotation))
+    }
+
+    func damageAt(_ scenePoint: CGPoint, amount: CGFloat) -> Bool {
+        guard let parent else { return damage(amount) }
+        let local = convert(scenePoint, from: parent)
+        return damage(amount * (local.y > kind.size.height * 0.23 ? 1.75 : 1))
+    }
+
     func release(with velocity: CGVector, powerMultiplier: CGFloat) {
         guard !isDefeated else { return }
         isGrabbed = false
@@ -653,6 +666,17 @@ final class ZombieNode: SKNode {
     func damage(_ amount: CGFloat) -> Bool {
         guard !isDefeated else { return true }
         health -= amount
+        if kind.isBoss {
+            let fraction = max(0, health / maximumHealth)
+            let nextPhase = fraction <= 0.33 ? 3 : (fraction <= 0.66 ? 2 : 1)
+            if nextPhase != bossPhase {
+                bossPhase = nextPhase
+                abilityTime = max(abilityTime, 3)
+                let tint: SKColor = nextPhase == 3 ? .red : .orange
+                sprites.values.forEach { $0.color = tint; $0.colorBlendFactor = 0.18 }
+                rig.run(.sequence([.scale(to: 1.1, duration: 0.16), .scale(to: 1, duration: 0.16)]), withKey: "bossPhase")
+            }
+        }
         if kind.isBoss, !bossIsStunned {
             bossStunDamage += amount
             if bossStunDamage >= maximumHealth * 0.12 {

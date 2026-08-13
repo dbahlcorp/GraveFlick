@@ -95,11 +95,35 @@ final class GameRulesTests: XCTestCase {
         XCTAssertTrue(GameLevel.sandbox.isSandbox)
     }
 
+    func testFullCampaignHasTwentyFiveMissionsAndEightLocations() {
+        XCTAssertEqual(GameLevel.campaign.count, 25)
+        XCTAssertEqual(Set(GameLevel.campaign.compactMap(\.environmentID)).intersection([6, 7, 8]), Set([6, 7, 8]))
+        XCTAssertTrue(GameLevel.campaign.map(\.id).elementsEqual(1...25))
+    }
+
+    func testExpandedArsenalHasTwelveDistinctWeaponsAndUpgradeKeys() {
+        XCTAssertEqual(WeaponKind.allCases.count, 12)
+        XCTAssertEqual(Set(WeaponKind.allCases.map(\.rawValue)).count, 12)
+        let progress = PlayerProgress()
+        XCTAssertEqual(progress.upgradeLevel(.meteor), 0)
+    }
+
+    func testNewEnvironmentAndWeaponAssetsArePresent() {
+        for name in ["environment_06_campground", "environment_07_neon_motel", "environment_08_drive_in"] {
+            XCTAssertNotNil(UIImage(named: name), "Missing \(name)")
+        }
+        for weapon in WeaponKind.allCases where weapon.rawValue != WeaponKind.airstrike.rawValue {
+            XCTAssertGreaterThan(UIImage(named: weapon.icon)?.size.width ?? 0, 1, "Missing \(weapon.icon)")
+        }
+    }
+
     func testBossesRequireAStunBeforeTheyCanBeGrabbed() {
         let boss = ZombieNode(kind: .butcher, approachesFromLeft: true)
         XCTAssertFalse(boss.canBeGrabbed)
         _ = boss.damage(ZombieKind.butcher.hitPoints * 0.13)
         XCTAssertTrue(boss.canBeGrabbed)
+        _ = boss.damage(ZombieKind.butcher.hitPoints * 0.6)
+        XCTAssertGreaterThanOrEqual(boss.bossPhase, 2)
     }
 
     func testSurvivalDifficultyKeepsScalingAndAddsBossPressure() {

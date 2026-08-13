@@ -23,14 +23,17 @@ final class ProgressStore: ObservableObject {
         progress.highScores[result.levelID] = max(progress.highScores[result.levelID, default: 0], result.score)
         progress.stars[result.levelID] = max(progress.stars[result.levelID, default: 0], result.stars)
         progress.dailyDefeats += result.defeats
+        progress.totalDefeats += result.defeats
+        progress.bestCombo = max(progress.bestCombo, result.maxCombo)
+        if result.won && (result.levelID == 4 || result.levelID == 5 || result.levelID == 25) { progress.bossDefeats += 1 }
         // Endless mode always ends with won == false but still carries a positive reward
         // (GameRules.survivalReward), so currency is gated on having a reward at all, not on
         // winning — level-unlock progression stays win-gated since endless isn't in GameLevel.all.
         if result.won || result.reward > 0 {
             progress.currency += result.reward
         }
-        if result.won, GameLevel.all.indices.contains(result.levelID - 1) {
-            progress.highestUnlockedLevel = min(GameLevel.all.count, max(progress.highestUnlockedLevel, result.levelID + 1))
+        if result.won, GameLevel.campaign.indices.contains(result.levelID - 1) {
+            progress.highestUnlockedLevel = min(GameLevel.campaign.count, max(progress.highestUnlockedLevel, result.levelID + 1))
         }
         var newAchievements: [String] = []
         if result.won { newAchievements.append("first_shift") }
@@ -38,6 +41,10 @@ final class ProgressStore: ObservableObject {
         if result.maxCombo >= 8 { newAchievements.append("combo_8") }
         if result.score >= 5_000 { newAchievements.append("score_5000") }
         if result.levelID == 5 && result.won { newAchievements.append("last_light") }
+        if result.levelID == 25 && result.won { newAchievements.append("road_cleared") }
+        if result.wave >= 20 { newAchievements.append("survival_20") }
+        if result.maxCombo >= 20 { newAchievements.append("combo_20") }
+        if result.defeats >= 100 { newAchievements.append("century") }
         for achievement in newAchievements where !progress.achievements.contains(achievement) {
             progress.achievements.insert(achievement)
             progress.currency += 100

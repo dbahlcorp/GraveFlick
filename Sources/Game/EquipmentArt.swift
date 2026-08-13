@@ -39,9 +39,14 @@ extension WeaponKind {
         case .bowlingBall: .bowlingBall
         case .shotgun: .scatterblast
         case .airstrike: .airstrikeBeacon
-        case .anvil, .wreckingBall: .bowlingBall
-        case .grenade, .propaneTank: .airstrikeBeacon
+        case .anvil, .wreckingBall, .sniper, .greaseFire, .transformer, .deliveryTruck, .meteor: .bowlingBall
         }
+    }
+
+    var authoredTexture: SKTexture {
+        let texture = SKTexture(imageNamed: icon)
+        texture.filteringMode = .linear
+        return texture
     }
 }
 
