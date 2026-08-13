@@ -21,8 +21,9 @@ jobs:
         run: brew install xcodegen
       - name: Verify generated animation assets
         run: |
-          python3 -m pip install --disable-pip-version-check -r Scripts/requirements.txt
-          python3 Scripts/prepare_animation_atlases.py --root . --verify
+          python3 -m venv "$RUNNER_TEMP/graveflick-assets"
+          "$RUNNER_TEMP/graveflick-assets/bin/python" -m pip install --disable-pip-version-check -r Scripts/requirements.txt
+          "$RUNNER_TEMP/graveflick-assets/bin/python" Scripts/prepare_animation_atlases.py --root . --verify
       - name: Generate Xcode project
         run: xcodegen generate
       - name: Select available iPhone simulator
