@@ -20,7 +20,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.bahlcorp.graveflick
         PRODUCT_NAME: GraveFlick
         MARKETING_VERSION: 0.2.0
-        CURRENT_PROJECT_VERSION: 3
+        CURRENT_PROJECT_VERSION: 4
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: GraveFlick-Info.plist
         INFOPLIST_KEY_CFBundleDisplayName: GraveFlick
