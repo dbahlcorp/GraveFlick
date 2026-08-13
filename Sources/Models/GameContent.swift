@@ -90,6 +90,17 @@ struct GameLevel: Identifiable, Hashable {
     let skyColor: SKColor
     let horizonColor: SKColor
 
+    var environmentAssetName: String {
+        let slug = switch id {
+        case 1: "closing_time"
+        case 2: "freeway_hunger"
+        case 3: "hard_hats"
+        case 4: "pressure_cooker"
+        default: "last_light"
+        }
+        return String(format: "environment_%02d_%@", id, slug)
+    }
+
     static let all: [GameLevel] = [
         GameLevel(id: 1, title: "Closing Time", subtitle: "Learn the night shift", totalWaves: 3, waveDuration: 15, baseSpawnInterval: 1.65, reward: 180, enemyRoster: [.walker, .runner], skyColor: color(8, 12, 29), horizonColor: color(22, 31, 55)),
         GameLevel(id: 2, title: "Freeway Hunger", subtitle: "Fast feet, bad intentions", totalWaves: 4, waveDuration: 16, baseSpawnInterval: 1.45, reward: 260, enemyRoster: [.walker, .runner, .crawler], skyColor: color(10, 17, 38), horizonColor: color(24, 45, 67)),

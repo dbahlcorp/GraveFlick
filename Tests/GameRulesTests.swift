@@ -1,4 +1,5 @@
 import CoreGraphics
+import UIKit
 import XCTest
 @testable import GraveFlick
 
@@ -69,5 +70,10 @@ final class GameRulesTests: XCTestCase {
 
     func testCombatVFXHasCompleteAuthoredAssetSet() {
         XCTAssertTrue(CombatVFX.hasCompleteSet)
+    }
+
+    func testProductionUIHasCompleteAuthoredAssetSet() {
+        XCTAssertTrue(UIArt.hasCompleteSet)
+        XCTAssertTrue(GameLevel.all.allSatisfy { UIImage(named: $0.environmentAssetName) != nil })
     }
 }

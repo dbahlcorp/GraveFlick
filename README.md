@@ -2,7 +2,7 @@
 
 GraveFlick is an original, touch-first survival-comedy prototype for iPhone and iPad. Defend the Last Light Diner by grabbing shambling creatures, flicking them into the air, and slamming them into the pavement before they reach the building.
 
-The project takes inspiration from the tactile physics of early mobile games while using an original name, setting, characters, code, and programmatic art.
+The project takes inspiration from the tactile physics of early mobile games while using an original name, setting, characters, code, and fully authored production art.
 
 ## Complete vertical slice
 
