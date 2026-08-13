@@ -659,11 +659,13 @@ final class ZombieNode: SKNode {
                 bossIsStunned = true
                 bossStunDamage = 0
                 slowTime = 4
-                rig.color = .cyan
-                rig.colorBlendFactor = 0.28
+                sprites.values.forEach {
+                    $0.color = .cyan
+                    $0.colorBlendFactor = 0.28
+                }
                 run(.sequence([.wait(forDuration: 4), .run { [weak self] in
                     self?.bossIsStunned = false
-                    self?.rig.colorBlendFactor = 0
+                    self?.sprites.values.forEach { $0.colorBlendFactor = 0 }
                 }]), withKey: "bossStun")
             }
         }
