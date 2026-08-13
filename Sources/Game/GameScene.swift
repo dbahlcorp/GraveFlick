@@ -399,7 +399,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func fireScatterblast() {
         let center = CGPoint(x: size.width / 2, y: groundY + 110)
-        for zombie in activeZombies.filter({ !$0.isDefeated }) {
+        let zombies = activeZombies.filter { !$0.isDefeated }
+        for zombie in zombies {
             let dx = zombie.position.x - center.x
             let direction: CGFloat = dx < 0 ? -1 : 1
             zombie.launch(with: CGVector(dx: direction * 390, dy: 270))
