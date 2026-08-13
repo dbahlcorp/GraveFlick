@@ -120,10 +120,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             announce(text: "CLEAR THE LOT", color: SKColor(red: 1, green: 0.77, blue: 0.24, alpha: 1))
         }
 
-        let zombies = world.children.compactMap { $0 as? ZombieNode }
+        let zombies = activeZombies
         for zombie in zombies {
             zombie.updateWalking(deltaTime: deltaTime, reducedMotion: settings.reducedMotion)
-            if !zombie.isGrabbed, !zombie.isThrown, zombie.frame.intersects(houseFrame.insetBy(dx: 18, dy: 0)) {
+            if zombie.isDefeated { continue }
+            if !zombie.isGrabbed, !zombie.isThrown, zombieHasReachedHouse(zombie) {
                 zombieReachedHouse(zombie)
             } else if zombie.position.y < -170 || zombie.position.x < -220 || zombie.position.x > size.width + 220 {
                 defeat(zombie, reason: .thrownOut)
@@ -196,7 +197,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         specialCharge = 0
         SoundManager.shared.play(.weapon)
         announce(text: "GRAVE TIME", color: .cyan)
-        for zombie in world.children.compactMap({ $0 as? ZombieNode }) {
+        for zombie in activeZombies {
             zombie.slow(for: 8)
             zombie.physicsBody?.velocity.dx *= 0.35
             zombie.physicsBody?.velocity.dy *= 0.35
@@ -249,6 +250,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func resolveImpact(on zombie: ZombieNode, damage: CGFloat) {
         SoundManager.shared.play(.impact)
+        zombie.playImpact(reducedMotion: settings.reducedMotion)
         if zombie.damage(damage) {
             defeat(zombie, reason: .impact)
         } else {
@@ -285,7 +287,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         for node in nodes(at: location) {
             var candidate: SKNode? = node
             while let current = candidate {
-                if let zombie = current as? ZombieNode { return zombie }
+                if let zombie = current as? ZombieNode, !zombie.isDefeated { return zombie }
                 candidate = current.parent
             }
         }
@@ -293,7 +295,23 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func zombieBody(in bodies: [SKPhysicsBody]) -> ZombieNode? {
-        bodies.first(where: { $0.categoryBitMask == PhysicsCategory.zombie })?.node as? ZombieNode
+        guard let zombie = bodies.first(where: { $0.categoryBitMask == PhysicsCategory.zombie })?.node as? ZombieNode,
+              !zombie.isDefeated else { return nil }
+        return zombie
+    }
+
+    private var activeZombies: [ZombieNode] {
+        world.children.compactMap { $0 as? ZombieNode }
+    }
+
+    /// Avoids SKNode.frame's accumulated-subtree walk by treating the zombie as a simple
+    /// box around its position, since grounded zombies never need per-part precision here.
+    private func zombieHasReachedHouse(_ zombie: ZombieNode) -> Bool {
+        let frame = houseFrame.insetBy(dx: 18, dy: 0)
+        let halfWidth = zombie.kind.size.width * 0.5
+        let halfHeight = zombie.kind.size.height * 0.5
+        guard zombie.position.x + halfWidth >= frame.minX, zombie.position.x - halfWidth <= frame.maxX else { return false }
+        return zombie.position.y + halfHeight >= frame.minY && zombie.position.y - halfHeight <= frame.maxY
     }
 
     private func spawnZombie(forceWalker: Bool) {
@@ -312,7 +330,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func zombieReachedHouse(_ zombie: ZombieNode) {
         guard zombie.parent != nil else { return }
-        zombie.removeFromParent()
+        zombie.playDefeat(reducedMotion: settings.reducedMotion) {}
         health = max(0, health - zombie.kind.dinerDamage)
         combo = 0
         flashHouse()
@@ -322,7 +340,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func defeat(_ zombie: ZombieNode, reason: DefeatReason) {
-        guard zombie.parent != nil else { return }
+        guard zombie.parent != nil, !zombie.isDefeated else { return }
         if elapsedTime - lastDefeatTime <= 1.8 { combo += 1 } else { combo = 1 }
         maxCombo = max(maxCombo, combo)
         defeats += 1
@@ -341,16 +359,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func explodeVolatile(at point: CGPoint) {
-        let nearby = world.children.compactMap { $0 as? ZombieNode }.filter {
-            hypot($0.position.x - point.x, $0.position.y - point.y) < 170
+        let nearby = activeZombies.filter {
+            !$0.isDefeated && hypot($0.position.x - point.x, $0.position.y - point.y) < 170
         }
         for zombie in nearby {
             if zombie.damage(1.6) { defeat(zombie, reason: .explosion) }
             else {
                 let dx = zombie.position.x - point.x
-                zombie.physicsBody?.isDynamic = true
-                zombie.physicsBody?.affectedByGravity = true
-                zombie.physicsBody?.applyImpulse(CGVector(dx: dx.sign == .minus ? -220 : 220, dy: 280))
+                zombie.launch(with: CGVector(dx: dx.sign == .minus ? -220 : 220, dy: 280))
             }
         }
         burst(at: point, color: .orange)
@@ -379,14 +395,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func fireScatterblast() {
         let center = CGPoint(x: size.width / 2, y: groundY + 110)
-        let zombies = world.children.compactMap { $0 as? ZombieNode }
+        let zombies = activeZombies.filter { !$0.isDefeated }
         for zombie in zombies {
             let dx = zombie.position.x - center.x
             let direction: CGFloat = dx < 0 ? -1 : 1
-            zombie.physicsBody?.isDynamic = true
-            zombie.physicsBody?.affectedByGravity = true
-            zombie.isThrown = true
-            zombie.physicsBody?.applyImpulse(CGVector(dx: direction * 390, dy: 270))
+            zombie.launch(with: CGVector(dx: direction * 390, dy: 270))
             if zombie.damage(zombie.kind == .brute ? 0.8 : 1.25) { defeat(zombie, reason: .weapon) }
         }
         radialFlash(at: center, color: .yellow)
@@ -405,7 +418,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func airstrikeImpact(x: CGFloat) {
         let point = CGPoint(x: x, y: groundY + 35)
-        for zombie in world.children.compactMap({ $0 as? ZombieNode }) where abs(zombie.position.x - x) < size.width * 0.22 {
+        for zombie in activeZombies where abs(zombie.position.x - x) < size.width * 0.22 {
             if zombie.damage(5) { defeat(zombie, reason: .weapon) }
         }
         radialFlash(at: point, color: .orange)
@@ -431,7 +444,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func triggerFreezer() {
-        for zombie in world.children.compactMap({ $0 as? ZombieNode }) { zombie.slow(for: 7) }
+        for zombie in activeZombies { zombie.slow(for: 7) }
         radialFlash(at: CGPoint(x: size.width / 2, y: size.height / 2), color: .cyan)
     }
 
@@ -444,7 +457,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guard !gameOver else { return }
         gameOver = true
         selectedZombie = nil
-        world.children.compactMap { $0 as? ZombieNode }.forEach { $0.physicsBody?.isDynamic = false }
+        activeZombies.forEach { $0.physicsBody?.isDynamic = false }
         if won { SoundManager.shared.play(.victory) }
         let earnedStars = GameRules.stars(score: score, health: health, startingHealth: startingHealth, won: won)
         let result = LevelResult(levelID: level.id, score: score, stars: earnedStars, reward: won ? level.reward + earnedStars * 40 : 0, won: won, defeats: defeats, maxCombo: maxCombo)
