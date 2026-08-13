@@ -1,0 +1,235 @@
+import SpriteKit
+
+final class DinerNode: SKNode {
+    private let building = SKSpriteNode(imageNamed: "diner_complete")
+    private let title = SKLabelNode(fontNamed: "AvenirNext-Heavy")
+    private let neonGlow = SKShapeNode(rectOf: CGSize(width: 1, height: 1), cornerRadius: 16)
+    private let leftWindowGlow = SKShapeNode(rectOf: CGSize(width: 1, height: 1), cornerRadius: 8)
+    private let rightWindowGlow = SKShapeNode(rectOf: CGSize(width: 1, height: 1), cornerRadius: 8)
+    private let doorGlint = SKShapeNode(rectOf: CGSize(width: 1, height: 1), cornerRadius: 3)
+    private let ventAnchor = SKNode()
+    private let reducedMotion: Bool
+    private var damageStage = 0
+
+    init(frame: CGRect, reducedMotion: Bool, highContrast: Bool) {
+        self.reducedMotion = reducedMotion
+        super.init()
+
+        name = "house"
+        zPosition = 5
+
+        building.texture?.filteringMode = .linear
+        building.size = Self.aspectFit(building.texture?.size() ?? .zero, inside: frame.size)
+        building.zPosition = 2
+        if highContrast {
+            building.color = .white
+            building.colorBlendFactor = 0.12
+        }
+        addChild(building)
+        position = CGPoint(x: frame.midX, y: frame.minY + building.size.height / 2)
+
+        let width = building.size.width
+        let height = building.size.height
+
+        neonGlow.path = CGPath(roundedRect: CGRect(x: -width * 0.285, y: -height * 0.075,
+                                                   width: width * 0.57, height: height * 0.15),
+                                cornerWidth: 16, cornerHeight: 16, transform: nil)
+        neonGlow.position = CGPoint(x: -width * 0.018, y: height * 0.33)
+        neonGlow.fillColor = SKColor(red: 1, green: 0.08, blue: 0.03, alpha: 0.08)
+        neonGlow.strokeColor = SKColor(red: 1, green: 0.48, blue: 0.16, alpha: 0.58)
+        neonGlow.lineWidth = 4
+        neonGlow.glowWidth = reducedMotion ? 0 : 12
+        neonGlow.zPosition = 3
+        addChild(neonGlow)
+
+        title.text = "LAST LIGHT"
+        title.fontSize = min(22, width * 0.083)
+        title.fontColor = .white
+        title.verticalAlignmentMode = .center
+        title.horizontalAlignmentMode = .center
+        title.position = neonGlow.position
+        title.zPosition = 4
+        addChild(title)
+
+        configureGlow(leftWindowGlow, rect: CGRect(x: -width * 0.42, y: -height * 0.20,
+                                                    width: width * 0.31, height: height * 0.27))
+        configureGlow(rightWindowGlow, rect: CGRect(x: width * 0.11, y: -height * 0.20,
+                                                     width: width * 0.31, height: height * 0.27))
+
+        doorGlint.path = CGPath(roundedRect: CGRect(x: -width * 0.012, y: -height * 0.16,
+                                                    width: width * 0.024, height: height * 0.30),
+                                 cornerWidth: 3, cornerHeight: 3, transform: nil)
+        doorGlint.position = CGPoint(x: width * 0.018, y: -height * 0.11)
+        doorGlint.fillColor = .white.withAlphaComponent(0.14)
+        doorGlint.strokeColor = .clear
+        doorGlint.zPosition = 3
+        addChild(doorGlint)
+
+        ventAnchor.position = CGPoint(x: width * 0.36, y: height * 0.30)
+        addChild(ventAnchor)
+        startIdleAnimations()
+    }
+
+    required init?(coder aDecoder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    var hasCompleteAssetSet: Bool {
+        guard let texture = building.texture else { return false }
+        return texture.size().width > 1 && texture.size().height > 1
+    }
+
+    func takeHit(remainingHealth: Int, maximumHealth: Int) {
+        let ratio = CGFloat(max(0, remainingHealth)) / CGFloat(max(1, maximumHealth))
+        damageStage = max(damageStage, ratio <= 0 ? 3 : (ratio <= 0.34 ? 2 : (ratio <= 0.67 ? 1 : 0)))
+
+        building.run(.sequence([
+            .colorize(with: .red, colorBlendFactor: 0.82, duration: 0.06),
+            .colorize(withColorBlendFactor: damageStage >= 2 ? 0.18 : 0, duration: 0.22)
+        ]), withKey: "damageFlash")
+
+        neonGlow.run(.sequence([
+            .fadeAlpha(to: 0.08, duration: 0.035),
+            .fadeAlpha(to: 1, duration: 0.06),
+            .fadeAlpha(to: damageStage >= 2 ? 0.42 : 1, duration: 0.10)
+        ]), withKey: "neonHit")
+        title.run(.sequence([
+            .fadeAlpha(to: 0.12, duration: 0.04),
+            .fadeAlpha(to: damageStage >= 2 ? 0.58 : 1, duration: 0.13)
+        ]), withKey: "titleHit")
+
+        guard !reducedMotion else {
+            applyDamageAppearance()
+            return
+        }
+
+        run(.sequence([
+            .rotate(toAngle: -0.025, duration: 0.035),
+            .rotate(toAngle: 0.032, duration: 0.045),
+            .rotate(toAngle: -0.016, duration: 0.04),
+            .rotate(toAngle: 0, duration: 0.07)
+        ]), withKey: "dinerHit")
+        doorGlint.run(.sequence([
+            .moveBy(x: -8, y: 0, duration: 0.04),
+            .moveBy(x: 14, y: 0, duration: 0.06),
+            .moveBy(x: -6, y: 0, duration: 0.07)
+        ]), withKey: "doorRattle")
+        emitSparks()
+        applyDamageAppearance()
+    }
+
+    private func configureGlow(_ node: SKShapeNode, rect: CGRect) {
+        node.path = CGPath(roundedRect: rect, cornerWidth: 8, cornerHeight: 8, transform: nil)
+        node.fillColor = SKColor(red: 1, green: 0.56, blue: 0.08, alpha: 0.08)
+        node.strokeColor = .clear
+        node.zPosition = 3
+        addChild(node)
+    }
+
+    private func startIdleAnimations() {
+        guard !reducedMotion else { return }
+        neonGlow.run(.repeatForever(.sequence([
+            .fadeAlpha(to: 0.68, duration: 0.055),
+            .fadeAlpha(to: 1, duration: 0.08),
+            .wait(forDuration: 1.8),
+            .fadeAlpha(to: 0.84, duration: 0.05),
+            .fadeAlpha(to: 1, duration: 0.06),
+            .wait(forDuration: 2.7)
+        ])), withKey: "neonFlicker")
+        title.run(.repeatForever(.sequence([
+            .fadeAlpha(to: 0.70, duration: 0.08),
+            .fadeAlpha(to: 1, duration: 0.12),
+            .wait(forDuration: 2.2)
+        ])), withKey: "titleFlicker")
+        leftWindowGlow.run(.repeatForever(.sequence([
+            .fadeAlpha(to: 0.42, duration: 1.3),
+            .fadeAlpha(to: 1, duration: 1.6)
+        ])), withKey: "windowGlow")
+        rightWindowGlow.run(.repeatForever(.sequence([
+            .wait(forDuration: 0.55),
+            .fadeAlpha(to: 0.48, duration: 1.5),
+            .fadeAlpha(to: 1, duration: 1.25)
+        ])), withKey: "windowGlow")
+        doorGlint.run(.repeatForever(.sequence([
+            .fadeAlpha(to: 0.42, duration: 0.7),
+            .fadeAlpha(to: 1, duration: 0.8),
+            .wait(forDuration: 2.4)
+        ])), withKey: "doorGlint")
+        run(.repeatForever(.sequence([
+            .wait(forDuration: 1.15),
+            .run { [weak self] in self?.emitSteam() }
+        ])), withKey: "steam")
+    }
+
+    private func applyDamageAppearance() {
+        switch damageStage {
+        case 1:
+            rightWindowGlow.alpha = 0.58
+            neonGlow.zRotation = -0.014
+        case 2:
+            rightWindowGlow.alpha = 0.12
+            leftWindowGlow.alpha = 0.34
+            neonGlow.alpha = 0.42
+            neonGlow.zRotation = -0.038
+            title.alpha = 0.58
+            emitSteam(dark: true)
+        case 3:
+            rightWindowGlow.alpha = 0
+            leftWindowGlow.alpha = 0.08
+            neonGlow.alpha = 0.10
+            title.alpha = 0.08
+            building.run(.group([
+                .scaleX(to: 1.04, duration: 0.13),
+                .scaleY(to: 0.92, duration: 0.13),
+                .moveBy(x: 0, y: -7, duration: 0.13)
+            ]), withKey: "collapse")
+            for _ in 0..<3 { emitSteam(dark: true) }
+        default:
+            break
+        }
+    }
+
+    private func emitSteam(dark: Bool = false) {
+        guard !reducedMotion else { return }
+        let puff = SKShapeNode(circleOfRadius: dark ? 9 : 6)
+        puff.fillColor = (dark ? SKColor.darkGray : SKColor.white).withAlphaComponent(dark ? 0.48 : 0.28)
+        puff.strokeColor = .clear
+        puff.position = ventAnchor.position
+        puff.zPosition = 5
+        addChild(puff)
+        puff.run(.sequence([
+            .group([
+                .moveBy(x: CGFloat.random(in: -10...12), y: dark ? 54 : 38, duration: dark ? 0.75 : 1.0),
+                .scale(to: dark ? 2.2 : 1.7, duration: dark ? 0.75 : 1.0),
+                .fadeOut(withDuration: dark ? 0.75 : 1.0)
+            ]),
+            .removeFromParent()
+        ]))
+    }
+
+    private func emitSparks() {
+        guard !reducedMotion else { return }
+        for index in 0..<6 {
+            let spark = SKShapeNode(circleOfRadius: 2.3)
+            spark.fillColor = index.isMultiple(of: 2) ? .yellow : .orange
+            spark.strokeColor = .clear
+            spark.position = neonGlow.position
+            spark.zPosition = 7
+            addChild(spark)
+            let angle = CGFloat(index) / 6 * .pi * 2
+            spark.run(.sequence([
+                .group([
+                    .moveBy(x: cos(angle) * 34, y: sin(angle) * 30 - 12, duration: 0.24),
+                    .fadeOut(withDuration: 0.25)
+                ]),
+                .removeFromParent()
+            ]))
+        }
+    }
+
+    private static func aspectFit(_ source: CGSize, inside bounds: CGSize) -> CGSize {
+        guard source.width > 0, source.height > 0 else { return bounds }
+        let scale = min(bounds.width / source.width, bounds.height / source.height)
+        return CGSize(width: source.width * scale, height: source.height * scale)
+    }
+}
