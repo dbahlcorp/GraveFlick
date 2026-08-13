@@ -251,6 +251,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func resolveImpact(on zombie: ZombieNode, damage: CGFloat) {
         SoundManager.shared.play(.impact)
+        zombie.playImpact(reducedMotion: settings.reducedMotion)
         if zombie.damage(damage) {
             defeat(zombie, reason: .impact)
         } else {
@@ -329,7 +330,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func zombieReachedHouse(_ zombie: ZombieNode) {
         guard zombie.parent != nil else { return }
-        zombie.removeFromParent()
+        zombie.playDefeat(reducedMotion: settings.reducedMotion) {}
         health = max(0, health - zombie.kind.dinerDamage)
         combo = 0
         dinerNode?.takeHit(remainingHealth: health, maximumHealth: startingHealth)
@@ -369,9 +370,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if zombie.damage(1.6) { defeat(zombie, reason: .explosion) }
             else {
                 let dx = zombie.position.x - point.x
-                zombie.physicsBody?.isDynamic = true
-                zombie.physicsBody?.affectedByGravity = true
-                zombie.physicsBody?.applyImpulse(CGVector(dx: dx.sign == .minus ? -220 : 220, dy: 280))
+                zombie.launch(with: CGVector(dx: dx.sign == .minus ? -220 : 220, dy: 280))
             }
         }
         burst(at: point, color: .orange)
@@ -403,10 +402,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         for zombie in activeZombies.filter({ !$0.isDefeated }) {
             let dx = zombie.position.x - center.x
             let direction: CGFloat = dx < 0 ? -1 : 1
-            zombie.physicsBody?.isDynamic = true
-            zombie.physicsBody?.affectedByGravity = true
-            zombie.isThrown = true
-            zombie.physicsBody?.applyImpulse(CGVector(dx: direction * 390, dy: 270))
+            zombie.launch(with: CGVector(dx: direction * 390, dy: 270))
             if zombie.damage(zombie.kind == .brute ? 0.8 : 1.25) { defeat(zombie, reason: .weapon) }
         }
         radialFlash(at: center, color: .yellow)
