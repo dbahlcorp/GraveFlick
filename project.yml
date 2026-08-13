@@ -12,9 +12,9 @@ targets:
     type: application
     platform: iOS
     sources:
-      - Sources
-    resources:
-      - Resources
+      - path: Sources
+      - path: Resources
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.bahlcorp.graveflick
