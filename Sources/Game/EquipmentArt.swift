@@ -39,7 +39,7 @@ extension WeaponKind {
         case .bowlingBall: .bowlingBall
         case .shotgun: .scatterblast
         case .airstrike: .airstrikeBeacon
-        case .anvil, .wreckingBall, .sniper, .greaseFire, .transformer, .deliveryTruck, .meteor: .bowlingBall
+        case .anvil, .grenade, .propaneTank, .wreckingBall, .sniper, .greaseFire, .transformer, .deliveryTruck, .meteor: .bowlingBall
         }
     }
 

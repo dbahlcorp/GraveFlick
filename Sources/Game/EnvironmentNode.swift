@@ -44,7 +44,7 @@ final class EnvironmentNode: SKNode {
 
     var hasCompleteAnimatedAtmosphere: Bool {
         if levelID > 5 { return hasCompleteAsset }
-        (1...3).allSatisfy { SKTexture(imageNamed: "environment_atmosphere_\(levelID)_\($0)").size().width > 1 }
+        return (1...3).allSatisfy { SKTexture(imageNamed: "environment_atmosphere_\(levelID)_\($0)").size().width > 1 }
     }
 
     private func addAuthoredAtmosphere(sceneSize: CGSize) {

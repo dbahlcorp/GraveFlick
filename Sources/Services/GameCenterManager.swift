@@ -15,7 +15,7 @@ final class GameCenterManager: ObservableObject {
     func report(_ result: LevelResult, achievements: Set<String>) {
         guard GKLocalPlayer.local.isAuthenticated else { return }
         let leaderboard = result.levelID == GameLevel.endless.id ? "graveflick.survival.score" : "graveflick.campaign.score"
-        GKLeaderboard.submitScore(result.score, context: result.levelID, player: .local, leaderboardIDs: [leaderboard]) { _ in }
+        GKLeaderboard.submitScore(result.score, context: result.levelID, player: GKLocalPlayer.local, leaderboardIDs: [leaderboard]) { _ in }
         let mapped = achievements.map { key -> GKAchievement in
             let item = GKAchievement(identifier: "graveflick.\(key)")
             item.percentComplete = 100
