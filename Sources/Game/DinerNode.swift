@@ -16,7 +16,6 @@ final class DinerNode: SKNode {
         super.init()
 
         name = "house"
-        position = CGPoint(x: frame.midX, y: frame.midY)
         zPosition = 5
 
         building.texture?.filteringMode = .linear
@@ -27,6 +26,7 @@ final class DinerNode: SKNode {
             building.colorBlendFactor = 0.12
         }
         addChild(building)
+        position = CGPoint(x: frame.midX, y: frame.minY + building.size.height / 2)
 
         let width = building.size.width
         let height = building.size.height

@@ -40,7 +40,7 @@ final class GameRulesTests: XCTestCase {
         XCTAssertEqual(GameRules.cooldown(base: 10, rapidGearLevel: 99), 6.8, accuracy: 0.001)
     }
 
-    func testDinerHasACompleteSixPartAssetSet() {
+    func testDinerHasCompleteAnimatedAsset() {
         let diner = DinerNode(
             frame: CGRect(x: 0, y: 0, width: 260, height: 250),
             reducedMotion: true,
