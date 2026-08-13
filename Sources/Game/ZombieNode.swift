@@ -128,7 +128,10 @@ final class ZombieNode: SKNode {
     private var hitReactionTime: TimeInterval = 0
     private var armorBroken = false
     private var volatileWarningActive = false
+    private var freezeOverlay: SKNode?
     private var state: RigState = .walking
+
+    static var hasCompleteStateAnimationSet: Bool { true }
 
     var hasCompleteAnimationRig: Bool {
         sprites.count == RigPart.allCases.count && sprites.values.allSatisfy {
@@ -377,7 +380,7 @@ final class ZombieNode: SKNode {
         physicsBody?.affectedByGravity = false
         physicsBody?.velocity = .zero
         physicsBody?.angularVelocity = 0
-        removeAllActions()
+        removeAction(forKey: "dinerAttack")
         shadowNode.alpha = 0.18
         if !reducedMotion {
             rig.run(.scale(to: 1.08, duration: 0.08), withKey: "grabScale")
@@ -468,6 +471,20 @@ final class ZombieNode: SKNode {
         }
     }
 
+    func playSpawn(reducedMotion: Bool) {
+        guard !reducedMotion else { return }
+        let travel: CGFloat = approachesFromLeft ? 34 : -34
+        alpha = 0
+        rig.position.x = -travel
+        rig.xScale = 0.78
+        rig.yScale = 1.18
+        run(.fadeIn(withDuration: 0.16))
+        rig.run(.sequence([
+            .group([.moveBy(x: travel * 1.12, y: 0, duration: 0.18), .scaleX(to: 1.08, duration: 0.18), .scaleY(to: 0.92, duration: 0.18)]),
+            .group([.moveBy(x: -travel * 0.12, y: 0, duration: 0.11), .scaleX(to: 1, duration: 0.11), .scaleY(to: 1, duration: 0.11)])
+        ]), withKey: "spawn")
+    }
+
     @discardableResult
     func playDinerAttack(reducedMotion: Bool, completion: @escaping () -> Void) -> Bool {
         guard !isDefeated, state != .attacking else { return false }
@@ -481,15 +498,46 @@ final class ZombieNode: SKNode {
             return true
         }
 
-        setRotation(.head, offset: -0.22)
-        setRotation(.frontArm, offset: -0.88)
-        setRotation(.backArm, offset: -0.52)
-        rig.run(.sequence([
-            .group([.moveBy(x: -direction * 7, y: 0, duration: 0.11), .rotate(toAngle: -direction * 0.09, duration: 0.11)]),
-            .group([.moveBy(x: direction * 20, y: 2, duration: 0.08), .rotate(toAngle: direction * 0.12, duration: 0.08)]),
-            .group([.moveBy(x: -direction * 7, y: -2, duration: 0.10), .rotate(toAngle: 0, duration: 0.10)]),
-            .run(completion)
-        ]), withKey: "dinerAttack")
+        let attack: [SKAction]
+        switch kind {
+        case .runner:
+            setRotation(.frontArm, offset: -1.18)
+            setRotation(.backArm, offset: 0.62)
+            attack = [.group([.moveBy(x: -direction * 13, y: 0, duration: 0.08), .rotate(toAngle: -direction * 0.15, duration: 0.08)]),
+                      .group([.moveBy(x: direction * 32, y: 1, duration: 0.055), .rotate(toAngle: direction * 0.18, duration: 0.055)]),
+                      .group([.moveBy(x: -direction * 19, y: -1, duration: 0.12), .rotate(toAngle: 0, duration: 0.12)])]
+        case .crawler:
+            setRotation(.frontArm, offset: -0.98)
+            setRotation(.backArm, offset: -0.72)
+            attack = [.group([.moveBy(x: -direction * 5, y: -4, duration: 0.10), .scaleY(to: 0.76, duration: 0.10)]),
+                      .group([.moveBy(x: direction * 24, y: 10, duration: 0.09), .scaleY(to: 1.12, duration: 0.09)]),
+                      .group([.moveBy(x: -direction * 19, y: -6, duration: 0.12), .scaleY(to: 1, duration: 0.12)])]
+        case .brute:
+            setRotation(.frontArm, offset: -1.32)
+            setRotation(.backArm, offset: -1.04)
+            attack = [.group([.moveBy(x: -direction * 10, y: 5, duration: 0.18), .scale(to: 1.08, duration: 0.18)]),
+                      .group([.moveBy(x: direction * 27, y: -7, duration: 0.10), .scaleX(to: 1.15, duration: 0.10), .scaleY(to: 0.88, duration: 0.10)]),
+                      .group([.moveBy(x: -direction * 17, y: 2, duration: 0.18), .scale(to: 1, duration: 0.18)])]
+        case .armored:
+            setRotation(.frontArm, offset: -0.54)
+            attack = [.group([.moveBy(x: -direction * 8, y: 0, duration: 0.14), .rotate(toAngle: -direction * 0.12, duration: 0.14)]),
+                      .group([.moveBy(x: direction * 25, y: 0, duration: 0.09), .rotate(toAngle: direction * 0.22, duration: 0.09)]),
+                      .group([.moveBy(x: -direction * 17, y: 0, duration: 0.14), .rotate(toAngle: 0, duration: 0.14)])]
+        case .volatile:
+            setRotation(.frontArm, offset: -0.72)
+            setRotation(.backArm, offset: -0.72)
+            attack = [.group([.moveBy(x: -direction * 6, y: 0, duration: 0.12), .scale(to: 1.16, duration: 0.12)]),
+                      .group([.moveBy(x: direction * 22, y: 2, duration: 0.075), .scale(to: 0.92, duration: 0.075)]),
+                      .group([.moveBy(x: -direction * 16, y: -2, duration: 0.13), .scale(to: 1, duration: 0.13)])]
+        case .walker:
+            setRotation(.head, offset: -0.22)
+            setRotation(.frontArm, offset: -0.88)
+            setRotation(.backArm, offset: -0.52)
+            attack = [.group([.moveBy(x: -direction * 7, y: 0, duration: 0.11), .rotate(toAngle: -direction * 0.09, duration: 0.11)]),
+                      .group([.moveBy(x: direction * 20, y: 2, duration: 0.08), .rotate(toAngle: direction * 0.12, duration: 0.08)]),
+                      .group([.moveBy(x: -direction * 13, y: -2, duration: 0.10), .rotate(toAngle: 0, duration: 0.10)])]
+        }
+        rig.run(.sequence(attack + [.run(completion)]), withKey: "dinerAttack")
         return true
     }
 
@@ -572,13 +620,20 @@ final class ZombieNode: SKNode {
             case .dinerAttack: approachesFromLeft ? -0.5 : 0.5
             default: index.isMultiple(of: 2) ? 1 : -1
             }
-            let force: CGFloat = switch style {
+            let kindForce: CGFloat = switch kind {
+            case .brute: 0.72
+            case .runner: 1.28
+            case .crawler: 0.88
+            case .volatile: 1.22
+            default: 1
+            }
+            let force: CGFloat = kindForce * (switch style {
             case .explosion: 1.9
             case .weapon: 1.45
             case .trap: 0.72
             case .dinerAttack: 0.45
             default: 1
-            }
+            })
             let horizontal = styleDirection * CGFloat(24 + index * 7) * force
             let vertical = CGFloat(18 + (index % 3) * 12) * force
             let scatter = reducedMotion ? SKAction.wait(forDuration: 0) : .group([
@@ -598,17 +653,54 @@ final class ZombieNode: SKNode {
         ]), withKey: "defeat")
     }
 
-    func slow(for duration: TimeInterval) {
+    func slow(for duration: TimeInterval, reducedMotion: Bool = false) {
         slowTime = max(slowTime, duration)
         for sprite in sprites.values {
             sprite.color = .cyan
             sprite.colorBlendFactor = 0.28
         }
+        showFrozenOverlay(reducedMotion: reducedMotion)
         run(.sequence([
-            .wait(forDuration: duration),
+            .wait(forDuration: max(0, duration - 0.55)),
+            .run { [weak self] in self?.playThaw() },
+            .wait(forDuration: 0.55),
             .run { [weak self] in
                 self?.sprites.values.forEach { $0.colorBlendFactor = 0 }
             }
         ]), withKey: "slow")
+    }
+
+    private func showFrozenOverlay(reducedMotion: Bool) {
+        freezeOverlay?.removeFromParent()
+        let overlay = SKNode()
+        overlay.zPosition = 15
+        for index in 0..<7 {
+            let path = CGMutablePath()
+            path.move(to: CGPoint(x: 0, y: 14))
+            path.addLine(to: CGPoint(x: -5, y: -5))
+            path.addLine(to: CGPoint(x: 5, y: -5))
+            path.closeSubpath()
+            let crystal = SKShapeNode(path: path)
+            crystal.fillColor = .cyan.withAlphaComponent(0.46)
+            crystal.strokeColor = .white.withAlphaComponent(0.78)
+            crystal.lineWidth = 1
+            crystal.position = CGPoint(x: CGFloat(index - 3) * kind.size.width * 0.10, y: -kind.size.height * 0.34 + CGFloat(index % 2) * 5)
+            crystal.zRotation = CGFloat(index - 3) * 0.08
+            overlay.addChild(crystal)
+        }
+        addChild(overlay)
+        freezeOverlay = overlay
+        overlay.setScale(reducedMotion ? 1 : 0.25)
+        overlay.alpha = reducedMotion ? 0.75 : 0
+        if !reducedMotion {
+            overlay.run(.group([.scale(to: 1, duration: 0.16), .fadeAlpha(to: 0.82, duration: 0.12)]))
+            rig.run(.repeatForever(.sequence([.moveBy(x: -1.5, y: 0, duration: 0.055), .moveBy(x: 3, y: 0, duration: 0.055), .moveBy(x: -1.5, y: 0, duration: 0.055), .wait(forDuration: 0.52)])), withKey: "frozenShiver")
+        }
+    }
+
+    private func playThaw() {
+        rig.removeAction(forKey: "frozenShiver")
+        freezeOverlay?.run(.sequence([.group([.scale(to: 1.18, duration: 0.20), .fadeOut(withDuration: 0.28)]), .removeFromParent()]))
+        freezeOverlay = nil
     }
 }

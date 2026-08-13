@@ -1,7 +1,7 @@
 import SpriteKit
 import SwiftUI
 
-enum AppScreen {
+enum AppScreen: Equatable {
     case menu, levels, upgrades, settings, credits, game
 }
 
@@ -123,6 +123,7 @@ struct GameRootView: View {
                 }
             }
         }
+        .animation(.easeInOut(duration: model.store.settings.reducedMotion ? 0 : 0.22), value: model.screen)
         .statusBarHidden()
         .persistentSystemOverlays(.hidden)
         .onChange(of: scenePhase) { _, phase in
@@ -134,6 +135,8 @@ struct GameRootView: View {
 private struct MainMenuView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var store: ProgressStore
+    @State private var neonPulse = false
+    @State private var entered = false
 
     init(model: AppModel) {
         self.model = model
@@ -150,6 +153,8 @@ private struct MainMenuView: View {
                             .scaledToFit()
                             .frame(width: min(geometry.size.width * 0.49, 610), height: geometry.size.height * 0.38)
                             .accessibilityLabel("GraveFlick, Last Light Diner")
+                            .opacity(neonPulse ? 1 : 0.82)
+                            .shadow(color: .red.opacity(neonPulse ? 0.48 : 0.16), radius: neonPulse ? 18 : 6)
                         Image("diner_complete")
                             .resizable()
                             .scaledToFit()
@@ -182,11 +187,18 @@ private struct MainMenuView: View {
                     }
                     .frame(maxWidth: 390)
                     .roadsidePanel(padding: 10)
+                    .offset(x: entered ? 0 : 34)
+                    .opacity(entered ? 1 : 0)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .padding(.horizontal, 30)
             .padding(.vertical, 18)
+        }
+        .onAppear {
+            guard !store.settings.reducedMotion else { entered = true; neonPulse = true; return }
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) { entered = true }
+            withAnimation(.easeInOut(duration: 1.25).repeatForever(autoreverses: true)) { neonPulse = true }
         }
     }
 }
@@ -454,6 +466,7 @@ private struct GameContainerView: View {
     @ObservedObject var store: ProgressStore
     @State private var showsSettings = false
     @State private var lowHealthPulse = false
+    @State private var tutorialGesture = false
 
     var body: some View {
         ZStack {
@@ -604,20 +617,36 @@ private struct GameContainerView: View {
             Image("ui_graveflick_logo").resizable().scaledToFit().frame(width: 260, height: 108)
             Text("YOUR FIRST NIGHT").font(.title.weight(.black))
             HStack(spacing: 24) {
-                tutorialStep("1", "GRAB", "Touch and hold any creature")
-                tutorialStep("2", "FLICK", "Drag quickly and release")
-                tutorialStep("3", "SLAM", "Use height and pavement impact")
+                tutorialStep("1", "GRAB", "Touch and hold any creature", icon: "hand.tap.fill", motion: .scale)
+                tutorialStep("2", "FLICK", "Drag quickly and release", icon: "hand.draw.fill", motion: .horizontal)
+                tutorialStep("3", "SLAM", "Use height and pavement impact", icon: "arrow.down.to.line.compact", motion: .vertical)
             }
             Text("Weapons and traps recharge automatically. Defeats charge Grave Time.")
                 .font(.caption).foregroundStyle(.white.opacity(0.65))
             Button("START NIGHT") { session.dismissTutorial(store: store) }
                 .buttonStyle(.borderedProminent).tint(.orange).controlSize(.large)
         }
+        .onAppear {
+            guard !store.settings.reducedMotion else { return }
+            withAnimation(.easeInOut(duration: 0.72).repeatForever(autoreverses: true)) { tutorialGesture = true }
+        }
     }
 
-    private func tutorialStep(_ number: String, _ title: String, _ detail: String) -> some View {
+    private enum TutorialMotion { case scale, horizontal, vertical }
+
+    private func tutorialStep(_ number: String, _ title: String, _ detail: String, icon: String, motion: TutorialMotion) -> some View {
         VStack(spacing: 6) {
-            Text(number).font(.title2.weight(.black)).foregroundStyle(.orange)
+            ZStack {
+                Circle().fill(Color.orange.opacity(0.20)).frame(width: 48, height: 48)
+                Image(systemName: icon).font(.title2.weight(.bold)).foregroundStyle(.orange)
+            }
+            .scaleEffect(motion == .scale && tutorialGesture ? 1.18 : 1)
+            .offset(x: motion == .horizontal && tutorialGesture ? 15 : 0,
+                    y: motion == .vertical && tutorialGesture ? 13 : 0)
+            .overlay(alignment: .topLeading) {
+                Text(number).font(.caption2.weight(.black)).foregroundStyle(.white)
+                    .frame(width: 20, height: 20).background(.red, in: Circle()).offset(x: -4, y: -4)
+            }
             Text(title).font(.headline.weight(.black))
             Text(detail).font(.caption).foregroundStyle(.white.opacity(0.62)).multilineTextAlignment(.center)
         }
@@ -642,7 +671,7 @@ private struct GameContainerView: View {
     }
 
     private func resultModal(_ result: LevelResult) -> some View {
-        ModalCard {
+        ModalCard(animated: !store.settings.reducedMotion) {
             Image(result.won ? "diner_complete" : "diner_destroyed")
                 .resizable().scaledToFit().frame(width: 280, height: 145)
             Text(result.won ? "LOT CLEARED" : "DINER OVERRUN").font(.title.weight(.black))
@@ -757,6 +786,14 @@ private struct RoadsideIcon: View {
 
 private struct ModalCard<Content: View>: View {
     @ViewBuilder let content: () -> Content
+    var animated = true
+    @State private var presented = false
+
+    init(animated: Bool = true, @ViewBuilder content: @escaping () -> Content) {
+        self.animated = animated
+        self.content = content
+    }
+
     var body: some View {
         ZStack {
             Color.black.opacity(0.67).ignoresSafeArea()
@@ -766,6 +803,12 @@ private struct ModalCard<Content: View>: View {
                 .background(LinearGradient(colors: [Color(red: 0.12, green: 0.13, blue: 0.16), Color(red: 0.035, green: 0.045, blue: 0.07)], startPoint: .top, endPoint: .bottom), in: RoundedRectangle(cornerRadius: 20))
                 .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color(red: 0.33, green: 0.72, blue: 0.69).opacity(0.62), lineWidth: 2))
                 .shadow(radius: 30)
+                .scaleEffect(presented ? 1 : 0.82)
+                .opacity(presented ? 1 : 0)
+        }
+        .onAppear {
+            if animated { withAnimation(.spring(response: 0.38, dampingFraction: 0.72)) { presented = true } }
+            else { presented = true }
         }
     }
 }

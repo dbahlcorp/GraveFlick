@@ -199,7 +199,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         SoundManager.shared.play(.weapon)
         announce(text: "GRAVE TIME", color: .cyan)
         for zombie in activeZombies {
-            zombie.slow(for: 8)
+            zombie.slow(for: 8, reducedMotion: settings.reducedMotion)
             zombie.physicsBody?.velocity.dx *= 0.35
             zombie.physicsBody?.velocity.dy *= 0.35
         }
@@ -331,6 +331,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         )
         zombie.zPosition = 10
         world.addChild(zombie)
+        zombie.playSpawn(reducedMotion: settings.reducedMotion)
     }
 
     private func zombieReachedHouse(_ zombie: ZombieNode) {
@@ -518,7 +519,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         } else {
             freezer.run(.sequence([.wait(forDuration: 0.4), .removeFromParent()]))
         }
-        for zombie in activeZombies { zombie.slow(for: 7) }
+        for zombie in activeZombies { zombie.slow(for: 7, reducedMotion: settings.reducedMotion) }
         playCombatVFX(.freezerBurst, at: CGPoint(x: size.width / 2, y: groundY + 84), size: min(size.width * 0.72, 520), direction: 1)
         radialFlash(at: CGPoint(x: size.width / 2, y: size.height / 2), color: .cyan)
     }

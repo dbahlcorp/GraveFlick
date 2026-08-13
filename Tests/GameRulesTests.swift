@@ -42,6 +42,7 @@ final class GameRulesTests: XCTestCase {
     }
 
     func testEveryZombieHasACompleteSixPartAnimationRig() {
+        XCTAssertTrue(ZombieNode.hasCompleteStateAnimationSet)
         for kind in ZombieKind.allCases {
             let zombie = ZombieNode(kind: kind, approachesFromLeft: true)
             XCTAssertTrue(zombie.hasCompleteAnimationRig, "Missing articulated animation art for \(kind.rawValue)")
