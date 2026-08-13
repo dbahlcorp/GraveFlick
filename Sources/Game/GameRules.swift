@@ -54,7 +54,7 @@ enum GameRules {
 
     static func storyBossKind(levelID: Int, wave: Int, totalWaves: Int) -> ZombieKind? {
         guard wave == totalWaves else { return nil }
-        switch levelID {
+        return switch levelID {
         case 4: .butcher
         case 5: .colossus
         default: nil
