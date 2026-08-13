@@ -9,6 +9,8 @@ The project takes inspiration from the tactile physics of early mobile games whi
 - Direct one-finger grabbing, dragging, flicking, and height-sensitive ground slams
 - Six original illustrated enemies with different speed, weight, armor, health, and diner damage
 - Zombie-to-zombie collisions, volatile chain explosions, combo scoring, and Grave Time
+- Nine articulated regular zombies, including the infected waitress, riot cop, and graveyard groundskeeper
+- Two unique bosses: The Butcher and Neon Colossus, with dedicated rigs, attacks, resistances, and boss health UI
 - Three weapons: Bowling Ball, Scatterblast, and Neon Airstrike
 - Two traps: Spike Strip and Flash Freezer
 - Five finite levels with escalating waves, stars, rewards, unlocks, and high scores

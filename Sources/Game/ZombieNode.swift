@@ -7,6 +7,23 @@ enum ZombieKind: String, CaseIterable, Codable {
     case crawler
     case armored
     case volatile
+    case waitress
+    case riot
+    case groundskeeper
+    case butcher
+    case colossus
+
+    static let regularCases: [ZombieKind] = [.walker, .runner, .brute, .crawler, .armored, .volatile, .waitress, .riot, .groundskeeper]
+
+    var isBoss: Bool { self == .butcher || self == .colossus }
+
+    var displayName: String {
+        switch self {
+        case .butcher: "THE BUTCHER"
+        case .colossus: "NEON COLOSSUS"
+        default: rawValue.uppercased()
+        }
+    }
 
     var assetName: String { rawValue }
 
@@ -18,6 +35,11 @@ enum ZombieKind: String, CaseIterable, Codable {
         case .crawler: CGSize(width: 105, height: 72)
         case .armored: CGSize(width: 84, height: 120)
         case .volatile: CGSize(width: 104, height: 126)
+        case .waitress: CGSize(width: 78, height: 116)
+        case .riot: CGSize(width: 92, height: 126)
+        case .groundskeeper: CGSize(width: 88, height: 122)
+        case .butcher: CGSize(width: 142, height: 164)
+        case .colossus: CGSize(width: 154, height: 174)
         }
     }
 
@@ -29,6 +51,11 @@ enum ZombieKind: String, CaseIterable, Codable {
         case .crawler: 58
         case .armored: 34
         case .volatile: 38
+        case .waitress: 62
+        case .riot: 31
+        case .groundskeeper: 46
+        case .butcher: 22
+        case .colossus: 18
         }
     }
 
@@ -40,6 +67,11 @@ enum ZombieKind: String, CaseIterable, Codable {
         case .crawler: 1.25
         case .armored: 2.8
         case .volatile: 1.8
+        case .waitress: 1.15
+        case .riot: 3.6
+        case .groundskeeper: 2.1
+        case .butcher: 14
+        case .colossus: 20
         }
     }
 
@@ -51,6 +83,11 @@ enum ZombieKind: String, CaseIterable, Codable {
         case .crawler: 25
         case .armored: 42
         case .volatile: 30
+        case .waitress: 20
+        case .riot: 48
+        case .groundskeeper: 34
+        case .butcher: 75
+        case .colossus: 92
         }
     }
 
@@ -62,10 +99,46 @@ enum ZombieKind: String, CaseIterable, Codable {
         case .crawler: 175
         case .armored: 260
         case .volatile: 240
+        case .waitress: 165
+        case .riot: 340
+        case .groundskeeper: 220
+        case .butcher: 1_500
+        case .colossus: 2_200
         }
     }
 
-    var dinerDamage: Int { self == .brute || self == .volatile ? 2 : 1 }
+    var dinerDamage: Int {
+        if self == .butcher { return 3 }
+        if self == .colossus { return 4 }
+        return self == .brute || self == .volatile || self == .groundskeeper ? 2 : 1
+    }
+
+    var throwResistance: CGFloat {
+        switch self {
+        case .riot: 1.25
+        case .butcher: 1.8
+        case .colossus: 2.15
+        default: 1
+        }
+    }
+
+    var weaponDamageMultiplier: CGFloat {
+        switch self {
+        case .riot: 0.6
+        case .butcher: 0.72
+        case .colossus: 0.58
+        default: 1
+        }
+    }
+
+    var trapDamageMultiplier: CGFloat {
+        switch self {
+        case .riot: 0.55
+        case .butcher: 0.8
+        case .colossus: 0.45
+        default: 1
+        }
+    }
 }
 
 private enum RigPart: CaseIterable {
@@ -132,8 +205,10 @@ final class ZombieNode: SKNode {
     private var volatileWarningActive = false
     private var freezeOverlay: SKNode?
     private var state: ZombieAnimationState = .walking
+    var onHealthChanged: ((CGFloat) -> Void)?
 
     var currentAnimationState: ZombieAnimationState { state }
+    var healthFraction: CGFloat { max(0, health / maximumHealth) }
 
     var hasCompleteAnimationRig: Bool {
         sprites.count == RigPart.allCases.count && sprites.values.allSatisfy {
@@ -173,11 +248,11 @@ final class ZombieNode: SKNode {
         physicsBody = SKPhysicsBody(rectangleOf: physicsSize, center: CGPoint(x: 0, y: -kind.size.height * 0.04))
         physicsBody?.isDynamic = false
         physicsBody?.allowsRotation = true
-        physicsBody?.restitution = kind == .brute ? 0.16 : 0.30
+        physicsBody?.restitution = kind == .brute || kind.isBoss ? 0.16 : 0.30
         physicsBody?.friction = 0.74
         physicsBody?.linearDamping = 0.17
         physicsBody?.angularDamping = 0.34
-        physicsBody?.mass = kind == .brute ? 2.4 : (kind == .crawler ? 0.75 : 1.1)
+        physicsBody?.mass = kind.isBoss ? 4.2 : (kind == .brute ? 2.4 : (kind == .crawler ? 0.75 : 1.1))
         physicsBody?.categoryBitMask = PhysicsCategory.zombie
         physicsBody?.collisionBitMask = PhysicsCategory.ground | PhysicsCategory.boundary | PhysicsCategory.zombie | PhysicsCategory.weapon
         physicsBody?.contactTestBitMask = PhysicsCategory.ground | PhysicsCategory.zombie | PhysicsCategory.weapon | PhysicsCategory.trap
@@ -245,10 +320,10 @@ final class ZombieNode: SKNode {
                 .frontLeg: PartPose(position: CGPoint(x: -torsoWidth * 0.10, y: -torsoHeight * 0.22), rotation: -0.10)
             ]
         } else {
-            let lean: CGFloat = kind == .runner ? -0.12 : (kind == .brute ? 0.03 : -0.035)
+            let lean: CGFloat = kind == .runner || kind == .waitress ? -0.12 : (kind == .brute || kind.isBoss ? 0.03 : -0.035)
             let backShoulderX: CGFloat = switch kind {
-            case .brute, .armored, .volatile: -torsoWidth * 0.30
-            case .runner: -torsoWidth * 0.16
+            case .brute, .armored, .volatile, .riot, .groundskeeper, .butcher, .colossus: -torsoWidth * 0.30
+            case .runner, .waitress: -torsoWidth * 0.16
             default: torsoWidth * 0.03
             }
             restPose = [
@@ -316,7 +391,7 @@ final class ZombieNode: SKNode {
         position.x += direction * kind.speed * movementMultiplier * slowMultiplier * CGFloat(deltaTime)
         guard !reducedMotion else { return }
 
-        let cadence: CGFloat = kind == .runner ? 12.5 : (kind == .crawler ? 10.5 : (kind == .brute ? 6.2 : 8.2))
+        let cadence: CGFloat = kind == .runner || kind == .waitress ? 12.5 : (kind == .crawler ? 10.5 : (kind == .brute || kind.isBoss ? 5.4 : 8.2))
         walkPhase += CGFloat(deltaTime) * cadence * slowMultiplier
         applyWalkingPose()
     }
@@ -325,10 +400,10 @@ final class ZombieNode: SKNode {
         let stride = sin(walkPhase)
         let counterStride = sin(walkPhase + .pi)
         let bob = abs(sin(walkPhase))
-        let amplitude: CGFloat = kind == .runner ? 0.34 : (kind == .brute ? 0.16 : (kind == .crawler ? 0.24 : 0.25))
+        let amplitude: CGFloat = kind == .runner || kind == .waitress ? 0.34 : (kind == .brute || kind.isBoss ? 0.16 : (kind == .crawler ? 0.24 : 0.25))
         let hitLean: CGFloat = hitReactionTime > 0 ? -0.18 : 0
 
-        rig.position.y = bob * (kind == .brute ? 1.4 : 2.7)
+        rig.position.y = bob * (kind == .brute || kind.isBoss ? 1.4 : 2.7)
         rig.zRotation = (kind == .crawler ? stride * 0.025 : stride * 0.018) + hitLean
         rig.xScale = 1 + bob * 0.018
         rig.yScale = 1 - bob * 0.018
@@ -401,7 +476,7 @@ final class ZombieNode: SKNode {
         highestPoint = position.y
         physicsBody?.isDynamic = true
         physicsBody?.affectedByGravity = true
-        physicsBody?.velocity = CGVector(dx: velocity.dx * powerMultiplier, dy: velocity.dy * powerMultiplier)
+        physicsBody?.velocity = CGVector(dx: velocity.dx * powerMultiplier / kind.throwResistance, dy: velocity.dy * powerMultiplier / kind.throwResistance)
         physicsBody?.angularVelocity = max(-8, min(8, -velocity.dx / 175))
         rig.run(.scale(to: 1, duration: 0.08), withKey: "grabScale")
     }
@@ -504,7 +579,7 @@ final class ZombieNode: SKNode {
 
         let attack: [SKAction]
         switch kind {
-        case .runner:
+        case .runner, .waitress:
             setRotation(.frontArm, offset: -1.18)
             setRotation(.backArm, offset: 0.62)
             attack = [.group([.moveBy(x: -direction * 13, y: 0, duration: 0.08), .rotate(toAngle: -direction * 0.15, duration: 0.08)]),
@@ -516,13 +591,13 @@ final class ZombieNode: SKNode {
             attack = [.group([.moveBy(x: -direction * 5, y: -4, duration: 0.10), .scaleY(to: 0.76, duration: 0.10)]),
                       .group([.moveBy(x: direction * 24, y: 10, duration: 0.09), .scaleY(to: 1.12, duration: 0.09)]),
                       .group([.moveBy(x: -direction * 19, y: -6, duration: 0.12), .scaleY(to: 1, duration: 0.12)])]
-        case .brute:
+        case .brute, .groundskeeper:
             setRotation(.frontArm, offset: -1.32)
             setRotation(.backArm, offset: -1.04)
             attack = [.group([.moveBy(x: -direction * 10, y: 5, duration: 0.18), .scale(to: 1.08, duration: 0.18)]),
                       .group([.moveBy(x: direction * 27, y: -7, duration: 0.10), .scaleX(to: 1.15, duration: 0.10), .scaleY(to: 0.88, duration: 0.10)]),
                       .group([.moveBy(x: -direction * 17, y: 2, duration: 0.18), .scale(to: 1, duration: 0.18)])]
-        case .armored:
+        case .armored, .riot:
             setRotation(.frontArm, offset: -0.54)
             attack = [.group([.moveBy(x: -direction * 8, y: 0, duration: 0.14), .rotate(toAngle: -direction * 0.12, duration: 0.14)]),
                       .group([.moveBy(x: direction * 25, y: 0, duration: 0.09), .rotate(toAngle: direction * 0.22, duration: 0.09)]),
@@ -533,6 +608,18 @@ final class ZombieNode: SKNode {
             attack = [.group([.moveBy(x: -direction * 6, y: 0, duration: 0.12), .scale(to: 1.16, duration: 0.12)]),
                       .group([.moveBy(x: direction * 22, y: 2, duration: 0.075), .scale(to: 0.92, duration: 0.075)]),
                       .group([.moveBy(x: -direction * 16, y: -2, duration: 0.13), .scale(to: 1, duration: 0.13)])]
+        case .butcher:
+            setRotation(.frontArm, offset: -1.48)
+            setRotation(.backArm, offset: -1.12)
+            attack = [.group([.moveBy(x: -direction * 14, y: 9, duration: 0.24), .scale(to: 1.1, duration: 0.24)]),
+                      .group([.moveBy(x: direction * 39, y: -12, duration: 0.11), .rotate(toAngle: direction * 0.24, duration: 0.11)]),
+                      .group([.moveBy(x: -direction * 25, y: 3, duration: 0.22), .scale(to: 1, duration: 0.22), .rotate(toAngle: 0, duration: 0.22)])]
+        case .colossus:
+            setRotation(.frontArm, offset: -1.62)
+            setRotation(.backArm, offset: 0.48)
+            attack = [.group([.moveBy(x: -direction * 18, y: 4, duration: 0.28), .scaleX(to: 1.12, duration: 0.28)]),
+                      .group([.moveBy(x: direction * 46, y: -9, duration: 0.12), .scaleY(to: 0.82, duration: 0.12)]),
+                      .group([.moveBy(x: -direction * 28, y: 5, duration: 0.25), .scale(to: 1, duration: 0.25)])]
         case .walker:
             setRotation(.head, offset: -0.22)
             setRotation(.frontArm, offset: -0.88)
@@ -549,6 +636,7 @@ final class ZombieNode: SKNode {
     func damage(_ amount: CGFloat) -> Bool {
         guard !isDefeated else { return true }
         health -= amount
+        onHealthChanged?(healthFraction)
         healthBar.isHidden = false
         healthBar.xScale = max(0.05, health / maximumHealth)
         hitReactionTime = 0.16
@@ -565,7 +653,7 @@ final class ZombieNode: SKNode {
                 .moveBy(x: -direction * 7, y: -2, duration: 0.10)
             ]), withKey: "hit")
         }
-        if kind == .armored, !armorBroken, health <= maximumHealth * 0.48 {
+        if (kind == .armored || kind == .riot), !armorBroken, health <= maximumHealth * 0.48 {
             armorBroken = true
             playArmorBreak()
         }
@@ -625,10 +713,13 @@ final class ZombieNode: SKNode {
             default: index.isMultiple(of: 2) ? 1 : -1
             }
             let kindForce: CGFloat = switch kind {
-            case .brute: 0.72
-            case .runner: 1.28
+            case .brute, .groundskeeper: 0.72
+            case .runner, .waitress: 1.28
             case .crawler: 0.88
             case .volatile: 1.22
+            case .riot: 0.68
+            case .butcher: 0.48
+            case .colossus: 0.38
             default: 1
             }
             let styleForce: CGFloat = switch style {

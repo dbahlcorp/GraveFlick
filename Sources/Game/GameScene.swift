@@ -56,6 +56,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var gameOver = false
     private var spawningFinished = false
     private var didBuildWorld = false
+    private var spawnedBossWaves: Set<Int> = []
+    private let bossHUD = SKNode()
+    private let bossHealthFill = SKShapeNode(rectOf: CGSize(width: 260, height: 12), cornerRadius: 6)
+    private let bossNameLabel = SKLabelNode(fontNamed: "AvenirNext-Heavy")
 
     private var startingHealth: Int { GameRules.startingHealth + progress.upgradeLevel(.reinforcedDiner) }
     private var flickMultiplier: CGFloat { 1 + CGFloat(progress.upgradeLevel(.flickTraining)) * 0.10 }
@@ -87,6 +91,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         physicsWorld.contactDelegate = self
         addChild(world)
         buildEnvironment()
+        buildBossHUD()
         notifyDelegate()
         announce(text: level.title.uppercased(), color: .white)
         spawnZombie(forceWalker: true)
@@ -109,15 +114,25 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             let newWave = level.isEndless ? Int(elapsedTime / level.waveDuration) + 1 : min(level.totalWaves, Int(elapsedTime / level.waveDuration) + 1)
             if newWave != wave {
                 wave = newWave
-                announce(text: GameRules.survivalDifficulty(wave: wave).isBossWave && level.isEndless ? "BOSS WAVE \(wave)" : "WAVE \(wave)", color: .white)
+                let incomingBoss = level.isEndless
+                    ? GameRules.bossKind(forWave: wave)
+                    : GameRules.storyBossKind(levelID: level.id, wave: wave, totalWaves: level.totalWaves)
+                announce(text: incomingBoss.map { "\($0.displayName) INCOMING" } ?? "WAVE \(wave)", color: .white)
             }
             let difficulty = level.isEndless ? GameRules.survivalDifficulty(wave: wave, baseSpawnInterval: level.baseSpawnInterval) : nil
             let interval = difficulty?.spawnInterval ?? max(0.48, level.baseSpawnInterval - Double(wave - 1) * 0.09)
             if timeSinceSpawn >= interval {
                 timeSinceSpawn = 0
-                let spawnCount = difficulty?.spawnCount ?? 1
-                for index in 0..<spawnCount {
-                    spawnZombie(forceWalker: false, forceBoss: difficulty?.isBossWave == true && index == 0)
+                let bossKind = level.isEndless
+                    ? GameRules.bossKind(forWave: wave)
+                    : GameRules.storyBossKind(levelID: level.id, wave: wave, totalWaves: level.totalWaves)
+                if let bossKind, !spawnedBossWaves.contains(wave) {
+                    spawnedBossWaves.insert(wave)
+                    spawnZombie(forceWalker: false, bossKind: bossKind)
+                } else if bossKind == nil {
+                    for _ in 0..<(difficulty?.spawnCount ?? 1) {
+                        spawnZombie(forceWalker: false)
+                    }
                 }
             }
         } else if !spawningFinished {
@@ -234,13 +249,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         if let zombie = zombieBody(in: bodies), bodies.contains(where: { $0.categoryBitMask == PhysicsCategory.weapon }) {
             playCombatVFX(.zombieSplatter, at: contact.contactPoint, size: 92, direction: zombie.approachesFromLeft ? -1 : 1)
-            if zombie.damage(zombie.kind == .brute ? 1.8 : 4) { defeat(zombie, reason: .weapon) }
+            let baseDamage: CGFloat = zombie.kind == .brute ? 1.8 : 4
+            if zombie.damage(baseDamage * zombie.kind.weaponDamageMultiplier) { defeat(zombie, reason: .weapon) }
             return
         }
 
         if let zombie = zombieBody(in: bodies), bodies.contains(where: { $0.categoryBitMask == PhysicsCategory.trap }) {
             playCombatVFX(.zombieSplatter, at: contact.contactPoint, size: 76, direction: zombie.approachesFromLeft ? -1 : 1)
-            if zombie.damage(zombie.kind == .armored ? 0.7 : 1.5) { defeat(zombie, reason: .trap) }
+            let baseDamage: CGFloat = zombie.kind == .armored ? 0.7 : 1.5
+            if zombie.damage(baseDamage * zombie.kind.trapDamageMultiplier) { defeat(zombie, reason: .trap) }
             return
         }
 
@@ -313,6 +330,39 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         world.children.compactMap { $0 as? ZombieNode }
     }
 
+    private func buildBossHUD() {
+        bossHUD.zPosition = 190
+        bossHUD.position = CGPoint(x: size.width / 2, y: size.height - 48)
+        bossHUD.isHidden = true
+
+        let backing = SKShapeNode(rectOf: CGSize(width: 276, height: 28), cornerRadius: 8)
+        backing.fillColor = .black.withAlphaComponent(0.78)
+        backing.strokeColor = SKColor(red: 0.92, green: 0.22, blue: 0.16, alpha: 1)
+        backing.lineWidth = 2
+        bossHUD.addChild(backing)
+
+        bossHealthFill.fillColor = SKColor(red: 0.92, green: 0.16, blue: 0.11, alpha: 1)
+        bossHealthFill.strokeColor = .clear
+        bossHealthFill.position.y = -4
+        bossHUD.addChild(bossHealthFill)
+
+        bossNameLabel.fontSize = 12
+        bossNameLabel.fontColor = .white
+        bossNameLabel.verticalAlignmentMode = .center
+        bossNameLabel.position.y = 11
+        bossHUD.addChild(bossNameLabel)
+        addChild(bossHUD)
+    }
+
+    private func showBossHUD(for zombie: ZombieNode) {
+        bossNameLabel.text = zombie.kind.displayName
+        bossHealthFill.xScale = 1
+        bossHUD.isHidden = false
+        zombie.onHealthChanged = { [weak self] fraction in
+            self?.bossHealthFill.xScale = max(0.001, fraction)
+        }
+    }
+
     /// Avoids SKNode.frame's accumulated-subtree walk by treating the zombie as a simple
     /// box around its position, since grounded zombies never need per-part precision here.
     private func zombieHasReachedHouse(_ zombie: ZombieNode) -> Bool {
@@ -323,18 +373,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         return zombie.position.y + halfHeight >= frame.minY && zombie.position.y - halfHeight <= frame.maxY
     }
 
-    private func spawnZombie(forceWalker: Bool, forceBoss: Bool = false) {
+    private func spawnZombie(forceWalker: Bool, bossKind: ZombieKind? = nil) {
         let unlockedCount = min(level.enemyRoster.count, max(1, 1 + wave))
         let roster = Array(level.enemyRoster.prefix(unlockedCount))
-        let kind = forceBoss ? (wave.isMultiple(of: 10) ? .brute : .armored) : (forceWalker ? (roster.contains(.walker) ? ZombieKind.walker : roster[0]) : roster.randomElement()!)
+        let kind = bossKind ?? (forceWalker ? (roster.contains(.walker) ? ZombieKind.walker : roster[0]) : roster.randomElement()!)
         let fromLeft = Bool.random()
         let difficulty = level.isEndless ? GameRules.survivalDifficulty(wave: wave, baseSpawnInterval: level.baseSpawnInterval) : nil
-        let bossMultiplier: CGFloat = forceBoss ? 1.6 : 1
         let zombie = ZombieNode(
             kind: kind,
             approachesFromLeft: fromLeft,
             movementMultiplier: difficulty?.speedMultiplier ?? 1,
-            healthMultiplier: (difficulty?.healthMultiplier ?? 1) * bossMultiplier
+            healthMultiplier: difficulty?.healthMultiplier ?? 1
         )
         zombie.position = CGPoint(
             x: fromLeft ? -kind.size.width : size.width + kind.size.width,
@@ -342,6 +391,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         )
         zombie.zPosition = 10
         world.addChild(zombie)
+        if kind.isBoss { showBossHUD(for: zombie) }
         zombie.playSpawn(reducedMotion: settings.reducedMotion)
     }
 
@@ -363,6 +413,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         SoundManager.shared.play(.dinerHit)
         runHaptic(.heavy)
         zombie.playDefeat(style: .dinerAttack, reducedMotion: settings.reducedMotion) {}
+        if zombie.kind.isBoss { bossHUD.isHidden = true }
         if health == 0 { finish(won: false) }
     }
 
@@ -374,14 +425,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         lastDefeatTime = elapsedTime
         let killScore = GameRules.score(for: zombie.kind, combo: combo)
         score += killScore
-        specialCharge = min(1, specialCharge + (zombie.kind == .brute ? 0.22 : 0.12))
+        specialCharge = min(1, specialCharge + (zombie.kind.isBoss ? 0.5 : (zombie.kind == .brute ? 0.22 : 0.12)))
         let point = zombie.position
         let volatile = zombie.kind == .volatile
         zombie.playDefeat(style: defeatStyle(for: reason), reducedMotion: settings.reducedMotion) {}
+        if zombie.kind.isBoss { bossHUD.isHidden = true }
         if reason == .thrownOut {
             burst(at: point, color: .cyan)
         } else if reason != .explosion {
-            playCombatVFX(.zombieSplatter, at: point, size: zombie.kind == .brute ? 156 : 118, direction: zombie.approachesFromLeft ? -1 : 1)
+            playCombatVFX(.zombieSplatter, at: point, size: zombie.kind.isBoss ? 210 : (zombie.kind == .brute ? 156 : 118), direction: zombie.approachesFromLeft ? -1 : 1)
         }
         SoundManager.shared.play(.defeat, comboScale: combo)
         runHaptic(.medium)

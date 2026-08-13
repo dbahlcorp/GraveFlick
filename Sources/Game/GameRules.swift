@@ -47,6 +47,20 @@ enum GameRules {
         )
     }
 
+    static func bossKind(forWave wave: Int) -> ZombieKind? {
+        guard max(1, wave).isMultiple(of: 5) else { return nil }
+        return wave.isMultiple(of: 10) ? .colossus : .butcher
+    }
+
+    static func storyBossKind(levelID: Int, wave: Int, totalWaves: Int) -> ZombieKind? {
+        guard wave == totalWaves else { return nil }
+        switch levelID {
+        case 4: .butcher
+        case 5: .colossus
+        default: nil
+        }
+    }
+
     static func animationFrameIndices(totalFrames: Int, reducedMotion: Bool, emphasizedFrame: Int) -> [Int] {
         guard totalFrames > 0 else { return [] }
         if reducedMotion { return [min(max(0, emphasizedFrame), totalFrames - 1)] }

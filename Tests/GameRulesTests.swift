@@ -59,6 +59,28 @@ final class GameRulesTests: XCTestCase {
         }
     }
 
+    func testExpandedRosterContainsThreeNewRegularsAndTwoUniqueBosses() {
+        XCTAssertTrue(ZombieKind.regularCases.contains(.waitress))
+        XCTAssertTrue(ZombieKind.regularCases.contains(.riot))
+        XCTAssertTrue(ZombieKind.regularCases.contains(.groundskeeper))
+        XCTAssertFalse(ZombieKind.regularCases.contains(.butcher))
+        XCTAssertFalse(ZombieKind.regularCases.contains(.colossus))
+        XCTAssertTrue(ZombieKind.butcher.isBoss)
+        XCTAssertTrue(ZombieKind.colossus.isBoss)
+        XCTAssertGreaterThan(ZombieKind.colossus.hitPoints, ZombieKind.butcher.hitPoints)
+        XCTAssertGreaterThan(ZombieKind.butcher.hitPoints, ZombieKind.riot.hitPoints)
+    }
+
+    func testBossWavesAlternateUniqueBosses() {
+        XCTAssertNil(GameRules.bossKind(forWave: 4))
+        XCTAssertEqual(GameRules.bossKind(forWave: 5), .butcher)
+        XCTAssertEqual(GameRules.bossKind(forWave: 10), .colossus)
+        XCTAssertEqual(GameRules.bossKind(forWave: 15), .butcher)
+        XCTAssertNil(GameRules.storyBossKind(levelID: 3, wave: 4, totalWaves: 4))
+        XCTAssertEqual(GameRules.storyBossKind(levelID: 4, wave: 5, totalWaves: 5), .butcher)
+        XCTAssertEqual(GameRules.storyBossKind(levelID: 5, wave: 6, totalWaves: 6), .colossus)
+    }
+
     func testSurvivalDifficultyKeepsScalingAndAddsBossPressure() {
         let waveOne = GameRules.survivalDifficulty(wave: 1)
         let waveTen = GameRules.survivalDifficulty(wave: 10)

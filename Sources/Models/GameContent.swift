@@ -104,11 +104,11 @@ struct GameLevel: Identifiable, Hashable {
     }
 
     static let all: [GameLevel] = [
-        GameLevel(id: 1, title: "Closing Time", subtitle: "Learn the night shift", totalWaves: 3, waveDuration: 15, baseSpawnInterval: 1.65, reward: 180, enemyRoster: [.walker, .runner], skyColor: color(8, 12, 29), horizonColor: color(22, 31, 55)),
-        GameLevel(id: 2, title: "Freeway Hunger", subtitle: "Fast feet, bad intentions", totalWaves: 4, waveDuration: 16, baseSpawnInterval: 1.45, reward: 260, enemyRoster: [.walker, .runner, .crawler], skyColor: color(10, 17, 38), horizonColor: color(24, 45, 67)),
-        GameLevel(id: 3, title: "Hard Hats", subtitle: "Armor changes the impact", totalWaves: 4, waveDuration: 18, baseSpawnInterval: 1.30, reward: 340, enemyRoster: [.walker, .runner, .armored, .brute], skyColor: color(20, 12, 30), horizonColor: color(57, 29, 55)),
-        GameLevel(id: 4, title: "Pressure Cooker", subtitle: "Keep volatile guests apart", totalWaves: 5, waveDuration: 18, baseSpawnInterval: 1.15, reward: 450, enemyRoster: [.runner, .crawler, .armored, .volatile], skyColor: color(23, 9, 22), horizonColor: color(75, 31, 34)),
-        GameLevel(id: 5, title: "Last Light", subtitle: "Everything wants breakfast", totalWaves: 6, waveDuration: 19, baseSpawnInterval: 0.98, reward: 650, enemyRoster: ZombieKind.allCases, skyColor: color(4, 8, 22), horizonColor: color(18, 41, 57))
+        GameLevel(id: 1, title: "Closing Time", subtitle: "Learn the night shift", totalWaves: 3, waveDuration: 15, baseSpawnInterval: 1.65, reward: 180, enemyRoster: [.walker, .runner, .waitress], skyColor: color(8, 12, 29), horizonColor: color(22, 31, 55)),
+        GameLevel(id: 2, title: "Freeway Hunger", subtitle: "Fast feet, bad intentions", totalWaves: 4, waveDuration: 16, baseSpawnInterval: 1.45, reward: 260, enemyRoster: [.walker, .runner, .crawler, .groundskeeper], skyColor: color(10, 17, 38), horizonColor: color(24, 45, 67)),
+        GameLevel(id: 3, title: "Hard Hats", subtitle: "Armor changes the impact", totalWaves: 4, waveDuration: 18, baseSpawnInterval: 1.30, reward: 340, enemyRoster: [.walker, .waitress, .riot, .armored, .brute], skyColor: color(20, 12, 30), horizonColor: color(57, 29, 55)),
+        GameLevel(id: 4, title: "Pressure Cooker", subtitle: "Keep volatile guests apart", totalWaves: 5, waveDuration: 18, baseSpawnInterval: 1.15, reward: 450, enemyRoster: [.runner, .crawler, .groundskeeper, .riot, .volatile], skyColor: color(23, 9, 22), horizonColor: color(75, 31, 34)),
+        GameLevel(id: 5, title: "Last Light", subtitle: "Everything wants breakfast", totalWaves: 6, waveDuration: 19, baseSpawnInterval: 0.98, reward: 650, enemyRoster: ZombieKind.regularCases, skyColor: color(4, 8, 22), horizonColor: color(18, 41, 57))
     ]
 
     /// Not part of `.all` on purpose — it doesn't participate in the level-select carousel,
@@ -121,7 +121,7 @@ struct GameLevel: Identifiable, Hashable {
         waveDuration: 16,
         baseSpawnInterval: 1.05,
         reward: 0,
-        enemyRoster: ZombieKind.allCases,
+        enemyRoster: ZombieKind.regularCases,
         skyColor: color(4, 8, 22),
         horizonColor: color(18, 41, 57),
         isEndless: true

@@ -40,7 +40,10 @@ def split_sheet(kind: str) -> None:
 
 def main() -> None:
     DESTINATION.mkdir(parents=True, exist_ok=True)
-    for kind in ("walker", "runner", "brute", "crawler", "armored", "volatile"):
+    for kind in (
+        "walker", "runner", "brute", "crawler", "armored", "volatile",
+        "waitress", "riot", "groundskeeper", "butcher", "colossus",
+    ):
         split_sheet(kind)
 
 
