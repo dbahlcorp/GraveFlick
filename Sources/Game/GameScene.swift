@@ -229,16 +229,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
 
         if let zombie = zombieBody(in: bodies), bodies.contains(where: { $0.categoryBitMask == PhysicsCategory.weapon }) {
+            playCombatVFX(.zombieSplatter, at: contact.contactPoint, size: 92, direction: zombie.approachesFromLeft ? -1 : 1)
             if zombie.damage(zombie.kind == .brute ? 1.8 : 4) { defeat(zombie, reason: .weapon) }
             return
         }
 
         if let zombie = zombieBody(in: bodies), bodies.contains(where: { $0.categoryBitMask == PhysicsCategory.trap }) {
+            playCombatVFX(.zombieSplatter, at: contact.contactPoint, size: 76, direction: zombie.approachesFromLeft ? -1 : 1)
             if zombie.damage(zombie.kind == .armored ? 0.7 : 1.5) { defeat(zombie, reason: .trap) }
             return
         }
 
         if bodies.allSatisfy({ $0.categoryBitMask == PhysicsCategory.zombie }), contact.collisionImpulse > 18 {
+            playCombatVFX(.zombieSplatter, at: contact.contactPoint, size: 82, direction: contact.contactNormal.dx >= 0 ? 1 : -1)
             for body in bodies {
                 if let zombie = body.node as? ZombieNode, zombie.damage(contact.collisionImpulse / 42) {
                     defeat(zombie, reason: .collision)
@@ -252,6 +255,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func resolveImpact(on zombie: ZombieNode, damage: CGFloat) {
         SoundManager.shared.play(.impact)
         zombie.playImpact(reducedMotion: settings.reducedMotion)
+        let impactPoint = CGPoint(x: zombie.position.x, y: groundY + 8)
+        playCombatVFX(.pavementImpact, at: impactPoint, size: min(210, 120 + damage * 36), direction: zombie.physicsBody?.velocity.dx.sign == .minus ? -1 : 1)
         if zombie.damage(damage) {
             defeat(zombie, reason: .impact)
         } else {
@@ -340,6 +345,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         health = max(0, health - zombie.kind.dinerDamage)
         combo = 0
         dinerNode?.takeHit(remainingHealth: health, maximumHealth: startingHealth)
+        let strikeX = zombie.position.x < size.width / 2 ? houseFrame.minX + 28 : houseFrame.maxX - 28
+        playCombatVFX(.pavementImpact, at: CGPoint(x: strikeX, y: groundY + 72), size: 138, direction: zombie.approachesFromLeft ? 1 : -1, tint: .red)
         shakeCamera(intensity: 1.4)
         SoundManager.shared.play(.dinerHit)
         runHaptic(.heavy)
@@ -359,7 +366,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let point = zombie.position
         let volatile = zombie.kind == .volatile
         zombie.playDefeat(style: defeatStyle(for: reason), reducedMotion: settings.reducedMotion) {}
-        burst(at: point, color: reason == .thrownOut ? .cyan : SKColor(red: 0.45, green: 0.78, blue: 0.24, alpha: 1))
+        if reason == .thrownOut {
+            burst(at: point, color: .cyan)
+        } else if reason != .explosion {
+            playCombatVFX(.zombieSplatter, at: point, size: zombie.kind == .brute ? 156 : 118, direction: zombie.approachesFromLeft ? -1 : 1)
+        }
         SoundManager.shared.play(.defeat, comboScale: combo)
         runHaptic(.medium)
         showScorePopup(at: point, score: killScore)
@@ -391,7 +402,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 zombie.launch(with: CGVector(dx: dx.sign == .minus ? -220 : 220, dy: 280))
             }
         }
-        burst(at: point, color: .orange)
+        playCombatVFX(.explosion, at: point, size: 270, direction: 1)
         shakeCamera(intensity: 1.2)
     }
 
@@ -436,6 +447,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if zombie.damage(zombie.kind == .brute ? 0.8 : 1.25) { defeat(zombie, reason: .weapon) }
         }
         radialFlash(at: center, color: .yellow)
+        playDirectionalDebris(at: center, color: .orange, direction: 1, count: 10)
         shakeCamera(intensity: 0.8)
     }
 
@@ -467,7 +479,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         for zombie in activeZombies where !zombie.isDefeated && abs(zombie.position.x - x) < size.width * 0.22 {
             if zombie.damage(5) { defeat(zombie, reason: .weapon) }
         }
-        radialFlash(at: point, color: .orange)
+        playCombatVFX(.explosion, at: point, size: 238, direction: indexDirection(for: x))
         shakeCamera(intensity: 1.1)
     }
 
@@ -507,6 +519,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             freezer.run(.sequence([.wait(forDuration: 0.4), .removeFromParent()]))
         }
         for zombie in activeZombies { zombie.slow(for: 7) }
+        playCombatVFX(.freezerBurst, at: CGPoint(x: size.width / 2, y: groundY + 84), size: min(size.width * 0.72, 520), direction: 1)
         radialFlash(at: CGPoint(x: size.width / 2, y: size.height / 2), color: .cyan)
     }
 
@@ -627,6 +640,60 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             let destination = CGPoint(x: point.x + cos(angle) * distance, y: point.y + sin(angle) * distance)
             particle.run(.sequence([.group([.move(to: destination, duration: 0.32), .fadeOut(withDuration: 0.34)]), .removeFromParent()]))
         }
+    }
+
+    private func playCombatVFX(_ effect: CombatVFX, at point: CGPoint, size: CGFloat, direction: CGFloat, tint: SKColor? = nil) {
+        let sprite = SKSpriteNode(texture: effect.texture, size: CGSize(width: size, height: size))
+        sprite.position = point
+        sprite.zPosition = 132
+        sprite.xScale = direction < 0 ? -0.22 : 0.22
+        sprite.yScale = 0.22
+        sprite.alpha = 0
+        if let tint {
+            sprite.color = tint
+            sprite.colorBlendFactor = 0.25
+        }
+        world.addChild(sprite)
+
+        let targetX: CGFloat = direction < 0 ? -1 : 1
+        let arrival = SKAction.group([
+            .scaleX(to: targetX * (settings.reducedMotion ? 1 : 1.12), duration: settings.reducedMotion ? 0.03 : 0.07),
+            .scaleY(to: settings.reducedMotion ? 1 : 1.12, duration: settings.reducedMotion ? 0.03 : 0.07),
+            .fadeIn(withDuration: 0.03)
+        ])
+        let settle = SKAction.group([
+            .scaleX(to: targetX, duration: 0.10),
+            .scaleY(to: 1, duration: 0.10)
+        ])
+        sprite.run(.sequence([arrival, settle, .wait(forDuration: settings.reducedMotion ? 0.06 : 0.13), .group([.scale(to: 1.18, duration: 0.18), .fadeOut(withDuration: 0.18)]), .removeFromParent()]))
+
+        let debrisColor: SKColor = switch effect {
+        case .pavementImpact: .darkGray
+        case .zombieSplatter: SKColor(red: 0.48, green: 0.76, blue: 0.16, alpha: 1)
+        case .explosion: .orange
+        case .freezerBurst: .cyan
+        }
+        playDirectionalDebris(at: point, color: debrisColor, direction: direction, count: effect == .explosion ? 14 : 8)
+    }
+
+    private func playDirectionalDebris(at point: CGPoint, color: SKColor, direction: CGFloat, count: Int) {
+        let particleCount = settings.reducedMotion ? min(4, count) : count
+        for index in 0..<particleCount {
+            let shard = SKShapeNode(rectOf: CGSize(width: CGFloat.random(in: 3...8), height: CGFloat.random(in: 2...5)), cornerRadius: 1)
+            shard.fillColor = index.isMultiple(of: 3) ? .white.withAlphaComponent(0.82) : color
+            shard.strokeColor = .clear
+            shard.position = point
+            shard.zPosition = 134
+            world.addChild(shard)
+            let spread = CGFloat(index) / CGFloat(max(1, particleCount - 1)) - 0.5
+            let dx = direction * CGFloat.random(in: 34...105) + spread * 46
+            let dy = CGFloat.random(in: 24...92) - abs(spread) * 18
+            shard.run(.sequence([.group([.moveBy(x: dx, y: dy, duration: 0.28), .rotate(byAngle: spread * .pi * 4, duration: 0.28), .fadeOut(withDuration: 0.31)]), .removeFromParent()]))
+        }
+    }
+
+    private func indexDirection(for x: CGFloat) -> CGFloat {
+        x < size.width / 2 ? -1 : 1
     }
 
     private func radialFlash(at point: CGPoint, color: SKColor) {

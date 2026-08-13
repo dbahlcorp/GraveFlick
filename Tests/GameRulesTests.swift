@@ -66,4 +66,8 @@ final class GameRulesTests: XCTestCase {
             XCTAssertTrue(environment.hasCompleteAsset, "Missing environment art for level \(level.id)")
         }
     }
+
+    func testCombatVFXHasCompleteAuthoredAssetSet() {
+        XCTAssertTrue(CombatVFX.hasCompleteSet)
+    }
 }
