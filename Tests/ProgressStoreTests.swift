@@ -48,13 +48,14 @@ final class ProgressStoreTests: XCTestCase {
         XCTAssertEqual(store.progress.highScores[1], 500)
     }
 
-    func testEndlessLossStillAwardsCurrencyWithoutUnlockingLevels() {
+    func testEndlessLossAwardsRunAndDailyCurrencyWithoutUnlockingLevels() {
         let store = ProgressStore(defaults: defaults)
         let startingCurrency = store.progress.currency
 
         store.complete(LevelResult(levelID: GameLevel.endless.id, score: 3_000, stars: 0, reward: 330, won: false, defeats: 40, maxCombo: 6, wave: 12))
 
-        XCTAssertEqual(store.progress.currency, startingCurrency + 330)
+        XCTAssertEqual(store.progress.currency, startingCurrency + 330 + 250)
+        XCTAssertTrue(store.progress.dailyClaimed)
         XCTAssertEqual(store.progress.highScores[GameLevel.endless.id], 3_000)
         XCTAssertEqual(store.progress.highestUnlockedLevel, 1)
     }
