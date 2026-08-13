@@ -378,11 +378,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func launchBowlingBall() {
-        let ball = SKShapeNode(circleOfRadius: 27)
+        let ball = SKSpriteNode(texture: EquipmentArt.bowlingBall.texture, size: CGSize(width: 58, height: 62))
         ball.name = "weapon"
-        ball.fillColor = SKColor(red: 0.14, green: 0.18, blue: 0.28, alpha: 1)
-        ball.strokeColor = .cyan
-        ball.lineWidth = 4
         ball.position = CGPoint(x: -35, y: groundY + 34)
         ball.zPosition = 30
         ball.physicsBody = SKPhysicsBody(circleOfRadius: 27)
@@ -394,11 +391,25 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         ball.physicsBody?.contactTestBitMask = PhysicsCategory.zombie
         ball.physicsBody?.velocity = CGVector(dx: 820, dy: 130)
         world.addChild(ball)
+        if !settings.reducedMotion {
+            ball.run(.repeatForever(.rotate(byAngle: -.pi * 2, duration: 0.38)), withKey: "roll")
+        }
         ball.run(.sequence([.wait(forDuration: 5), .removeFromParent()]))
     }
 
     private func fireScatterblast() {
         let center = CGPoint(x: size.width / 2, y: groundY + 110)
+        let scattergun = SKSpriteNode(texture: EquipmentArt.scatterblast.texture, size: CGSize(width: 150, height: 150))
+        scattergun.position = CGPoint(x: center.x, y: center.y + 16)
+        scattergun.zPosition = 135
+        world.addChild(scattergun)
+        let recoil = settings.reducedMotion ? CGFloat(4) : CGFloat(18)
+        scattergun.run(.sequence([
+            .moveBy(x: -recoil, y: -recoil * 0.25, duration: 0.045),
+            .moveBy(x: recoil, y: recoil * 0.25, duration: 0.11),
+            .fadeOut(withDuration: 0.12),
+            .removeFromParent()
+        ]))
         let zombies = activeZombies.filter { !$0.isDefeated }
         for zombie in zombies {
             let dx = zombie.position.x - center.x
@@ -411,6 +422,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func launchAirstrike() {
+        let beacon = SKSpriteNode(texture: EquipmentArt.airstrikeBeacon.texture, size: CGSize(width: 76, height: 108))
+        beacon.position = CGPoint(x: size.width / 2, y: groundY + 54)
+        beacon.zPosition = 32
+        beacon.setScale(0.05)
+        world.addChild(beacon)
+        let pulse = SKAction.sequence([.fadeAlpha(to: 0.38, duration: 0.14), .fadeAlpha(to: 1, duration: 0.14)])
+        beacon.run(.sequence([
+            .scale(to: 1, duration: settings.reducedMotion ? 0.01 : 0.18),
+            .repeat(pulse, count: 4),
+            .wait(forDuration: 0.45),
+            .fadeOut(withDuration: 0.2),
+            .removeFromParent()
+        ]))
         let xs = [size.width * 0.18, size.width * 0.5, size.width * 0.82]
         for (index, x) in xs.enumerated() {
             world.run(.sequence([
@@ -431,10 +455,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func placeSpikeStrips() {
         for x in [houseFrame.minX - 115, houseFrame.maxX + 115] {
-            let strip = SKShapeNode(rectOf: CGSize(width: 125, height: 18), cornerRadius: 4)
-            strip.fillColor = SKColor(red: 0.38, green: 0.40, blue: 0.46, alpha: 1)
-            strip.strokeColor = .yellow
-            strip.lineWidth = 3
+            let strip = SKSpriteNode(texture: EquipmentArt.spikeStrip.texture, size: CGSize(width: 125, height: 47))
             strip.position = CGPoint(x: x, y: groundY + 10)
             strip.zPosition = 8
             strip.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: 125, height: 30))
@@ -443,11 +464,30 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             strip.physicsBody?.collisionBitMask = PhysicsCategory.none
             strip.physicsBody?.contactTestBitMask = PhysicsCategory.zombie
             world.addChild(strip)
+            if !settings.reducedMotion {
+                strip.setScale(0.15)
+                strip.run(.sequence([.scale(to: 1.12, duration: 0.12), .scale(to: 1, duration: 0.1)]))
+            }
             strip.run(.sequence([.wait(forDuration: 9), .fadeOut(withDuration: 0.3), .removeFromParent()]))
         }
     }
 
     private func triggerFreezer() {
+        let freezer = SKSpriteNode(texture: EquipmentArt.flashFreezer.texture, size: CGSize(width: 104, height: 116))
+        freezer.position = CGPoint(x: size.width / 2, y: groundY + 58)
+        freezer.zPosition = 136
+        world.addChild(freezer)
+        if !settings.reducedMotion {
+            freezer.run(.sequence([
+                .group([.scale(to: 1.12, duration: 0.12), .rotate(byAngle: -0.04, duration: 0.12)]),
+                .group([.scale(to: 1, duration: 0.16), .rotate(toAngle: 0, duration: 0.16)]),
+                .wait(forDuration: 0.35),
+                .fadeOut(withDuration: 0.24),
+                .removeFromParent()
+            ]))
+        } else {
+            freezer.run(.sequence([.wait(forDuration: 0.4), .removeFromParent()]))
+        }
         for zombie in activeZombies { zombie.slow(for: 7) }
         radialFlash(at: CGPoint(x: size.width / 2, y: size.height / 2), color: .cyan)
     }
@@ -478,10 +518,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         pickup.lineWidth = 4
         pickup.position = point
         pickup.zPosition = 115
-        let icon = SKLabelNode(fontNamed: "AvenirNext-Heavy")
-        icon.text = "+"
-        icon.fontSize = 30
-        icon.verticalAlignmentMode = .center
+        let art = weapon.equipmentArt
+        let icon = SKSpriteNode(texture: art.texture, size: art.fittedSize(inside: CGSize(width: 40, height: 40)))
         pickup.addChild(icon)
         world.addChild(pickup)
         pickup.run(.repeatForever(.sequence([.scale(to: 1.13, duration: 0.45), .scale(to: 0.92, duration: 0.45)])))

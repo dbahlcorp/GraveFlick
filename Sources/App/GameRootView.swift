@@ -342,7 +342,14 @@ private struct UpgradeShopView: View {
 
     private func cardContent(title: String, detail: String, footer: String, icon: String) -> some View {
         HStack(spacing: 15) {
-            Image(systemName: icon).font(.title).foregroundStyle(.orange).frame(width: 42)
+            Group {
+                if icon.hasPrefix("weapon_") || icon.hasPrefix("trap_") {
+                    Image(icon).resizable().scaledToFit()
+                } else {
+                    Image(systemName: icon).font(.title).foregroundStyle(.orange)
+                }
+            }
+            .frame(width: 52, height: 52)
             VStack(alignment: .leading, spacing: 4) {
                 Text(title).font(.headline.weight(.black))
                 Text(detail).font(.caption).foregroundStyle(.white.opacity(0.62))
@@ -517,7 +524,10 @@ private struct GameContainerView: View {
         var body: some View {
             Button(action: action) {
                 VStack(spacing: 2) {
-                    Image(systemName: icon).font(.headline)
+                    Image(icon)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 28, height: 25)
                     Text(remaining > 0 ? "\(Int(ceil(remaining)))" : title.uppercased())
                         .font(.system(size: 8, weight: .black))
                         .lineLimit(1)

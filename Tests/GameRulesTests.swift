@@ -55,4 +55,8 @@ final class GameRulesTests: XCTestCase {
         )
         XCTAssertTrue(diner.hasCompleteAssetSet)
     }
+
+    func testEquipmentHasCompleteIllustratedAssetSet() {
+        XCTAssertTrue(EquipmentArt.hasCompleteSet)
+    }
 }
