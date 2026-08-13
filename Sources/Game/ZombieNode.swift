@@ -73,6 +73,7 @@ final class ZombieNode: SKNode {
     let approachesFromLeft: Bool
     var isGrabbed = false
     var isThrown = false
+    private(set) var isDefeated = false
     var hasResolvedImpact = false
     var highestPoint: CGFloat = 0
     private(set) var health: CGFloat
@@ -191,6 +192,13 @@ final class ZombieNode: SKNode {
             .colorize(withColorBlendFactor: 0, duration: 0.12)
         ]))
         return health <= 0
+    }
+
+    /// Marks this zombie as gone so GameScene's various zombie-iterating effects (splash
+    /// damage, hit-testing) skip it for the rest of the frame, even before removeFromParent()
+    /// takes it out of the node tree.
+    func markDefeated() {
+        isDefeated = true
     }
 
     func slow(for duration: TimeInterval) {

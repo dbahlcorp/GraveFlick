@@ -435,7 +435,9 @@ private struct GameContainerView: View {
             SpriteView(scene: session.scene, options: [.ignoresSiblingOrder])
                 .ignoresSafeArea()
 
-            if session.health == 1, session.result == nil { lowHealthVignette }
+            // <= 2, not == 1: a Brute/Volatile deals 2 diner damage in one hit (ZombieKind.dinerDamage),
+            // so health can jump straight from 2 to 0 without ever passing through 1.
+            if session.health > 0, session.health <= 2, session.result == nil { lowHealthVignette }
 
             VStack(spacing: 0) {
                 gameplayHUD

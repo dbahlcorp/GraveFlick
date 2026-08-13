@@ -37,7 +37,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private let world = SKNode()
-    private var dinerNode: DinerNode?
     private var selectedZombie: ZombieNode?
     private var touchSamples: [(point: CGPoint, time: TimeInterval)] = []
     private var lastUpdateTime: TimeInterval = 0
@@ -328,11 +327,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func zombieReachedHouse(_ zombie: ZombieNode) {
-        guard zombie.parent != nil else { return }
+        guard zombie.parent != nil, !zombie.isDefeated else { return }
+        zombie.markDefeated()
         zombie.removeFromParent()
         health = max(0, health - zombie.kind.dinerDamage)
         combo = 0
-        dinerNode?.takeHit(remainingHealth: health, maximumHealth: startingHealth)
+        flashHouse()
         shakeCamera(intensity: 1.4)
         SoundManager.shared.play(.dinerHit)
         runHaptic(.heavy)
@@ -341,6 +341,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func defeat(_ zombie: ZombieNode, reason: DefeatReason) {
         guard zombie.parent != nil, !zombie.isDefeated else { return }
+        zombie.markDefeated()
         if elapsedTime - lastDefeatTime <= 1.8 { combo += 1 } else { combo = 1 }
         maxCombo = max(maxCombo, combo)
         defeats += 1
@@ -581,9 +582,42 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func buildHouse() {
-        let diner = DinerNode(frame: houseFrame, reducedMotion: settings.reducedMotion, highContrast: settings.highContrast)
-        dinerNode = diner
-        world.addChild(diner)
+        let frame = houseFrame
+        let building = SKShapeNode(rect: frame, cornerRadius: 10)
+        building.name = "house"
+        building.fillColor = SKColor(red: 0.16, green: 0.12, blue: 0.15, alpha: 1)
+        building.strokeColor = settings.highContrast ? .white : SKColor(red: 0.55, green: 0.31, blue: 0.22, alpha: 1)
+        building.lineWidth = 6
+        building.zPosition = 5
+        world.addChild(building)
+
+        let sign = SKShapeNode(rectOf: CGSize(width: frame.width * 0.82, height: 52), cornerRadius: 12)
+        sign.fillColor = SKColor(red: 0.92, green: 0.28, blue: 0.16, alpha: 1)
+        sign.strokeColor = SKColor(red: 1, green: 0.77, blue: 0.26, alpha: 1)
+        sign.lineWidth = 5
+        sign.glowWidth = settings.reducedMotion ? 0 : 8
+        sign.position = CGPoint(x: frame.midX, y: frame.maxY - 48)
+        sign.zPosition = 7
+        world.addChild(sign)
+
+        let title = SKLabelNode(fontNamed: "AvenirNext-Heavy")
+        title.text = "LAST LIGHT"
+        title.fontSize = min(24, frame.width * 0.095)
+        title.fontColor = .white
+        title.verticalAlignmentMode = .center
+        title.position = sign.position
+        title.zPosition = 8
+        world.addChild(title)
+
+        for side in [CGFloat(-1), CGFloat(1)] {
+            let window = SKShapeNode(rectOf: CGSize(width: frame.width * 0.22, height: frame.height * 0.24), cornerRadius: 4)
+            window.fillColor = SKColor(red: 1, green: 0.73, blue: 0.24, alpha: 0.9)
+            window.strokeColor = .black.withAlphaComponent(0.45)
+            window.lineWidth = 5
+            window.position = CGPoint(x: frame.midX + side * frame.width * 0.28, y: frame.minY + frame.height * 0.30)
+            window.zPosition = 6
+            world.addChild(window)
+        }
     }
 
     private func burst(at point: CGPoint, color: SKColor) {
@@ -652,6 +686,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         label.zPosition = 150
         world.addChild(label)
         label.run(.sequence([.fadeIn(withDuration: 0.16), .wait(forDuration: 0.65), .fadeOut(withDuration: 0.28), .removeFromParent()]))
+    }
+
+    private func flashHouse() {
+        guard let house = world.childNode(withName: "house") else { return }
+        house.run(.sequence([.colorize(with: .red, colorBlendFactor: 0.85, duration: 0.08), .colorize(withColorBlendFactor: 0, duration: 0.22)]))
     }
 
     private func shakeCamera(intensity: CGFloat = 1) {
