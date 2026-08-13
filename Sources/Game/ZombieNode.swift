@@ -95,11 +95,16 @@ private struct PartPose {
 
 private enum RigState {
     case walking
+    case attacking
     case grabbed
     case airborne
     case impact
     case recovering
     case defeated
+}
+
+enum ZombieDefeatStyle {
+    case pavement, collision, weapon, trap, thrownOut, explosion, dinerAttack
 }
 
 final class ZombieNode: SKNode {
@@ -121,6 +126,8 @@ final class ZombieNode: SKNode {
     private var slowTime: TimeInterval = 0
     private var recoveryTime: TimeInterval = 0
     private var hitReactionTime: TimeInterval = 0
+    private var armorBroken = false
+    private var volatileWarningActive = false
     private var state: RigState = .walking
 
     var hasCompleteAnimationRig: Bool {
@@ -287,7 +294,7 @@ final class ZombieNode: SKNode {
             return
         }
 
-        if state == .impact { return }
+        if state == .impact || state == .attacking { return }
         if state == .recovering {
             recoveryTime -= deltaTime
             if recoveryTime <= 0 {
@@ -462,6 +469,31 @@ final class ZombieNode: SKNode {
     }
 
     @discardableResult
+    func playDinerAttack(reducedMotion: Bool, completion: @escaping () -> Void) -> Bool {
+        guard !isDefeated, state != .attacking else { return false }
+        state = .attacking
+        physicsBody?.isDynamic = false
+        physicsBody?.velocity = .zero
+        let direction: CGFloat = approachesFromLeft ? 1 : -1
+
+        if reducedMotion {
+            run(.sequence([.wait(forDuration: 0.12), .run(completion)]), withKey: "dinerAttack")
+            return true
+        }
+
+        setRotation(.head, offset: -0.22)
+        setRotation(.frontArm, offset: -0.88)
+        setRotation(.backArm, offset: -0.52)
+        rig.run(.sequence([
+            .group([.moveBy(x: -direction * 7, y: 0, duration: 0.11), .rotate(toAngle: -direction * 0.09, duration: 0.11)]),
+            .group([.moveBy(x: direction * 20, y: 2, duration: 0.08), .rotate(toAngle: direction * 0.12, duration: 0.08)]),
+            .group([.moveBy(x: -direction * 7, y: -2, duration: 0.10), .rotate(toAngle: 0, duration: 0.10)]),
+            .run(completion)
+        ]), withKey: "dinerAttack")
+        return true
+    }
+
+    @discardableResult
     func damage(_ amount: CGFloat) -> Bool {
         guard !isDefeated else { return true }
         health -= amount
@@ -475,15 +507,48 @@ final class ZombieNode: SKNode {
             ]))
         }
         if state == .walking {
+            let direction: CGFloat = approachesFromLeft ? -1 : 1
             rig.run(.sequence([
-                .moveBy(x: -5, y: 1, duration: 0.04),
-                .moveBy(x: 5, y: -1, duration: 0.10)
+                .moveBy(x: direction * 7, y: 2, duration: 0.04),
+                .moveBy(x: -direction * 7, y: -2, duration: 0.10)
             ]), withKey: "hit")
+        }
+        if kind == .armored, !armorBroken, health <= kind.hitPoints * 0.48 {
+            armorBroken = true
+            playArmorBreak()
+        }
+        if kind == .volatile, !volatileWarningActive, health <= kind.hitPoints * 0.55 {
+            volatileWarningActive = true
+            playVolatileWarning()
         }
         return health <= 0
     }
 
-    func playDefeat(reducedMotion: Bool, completion: @escaping () -> Void) {
+    private func playArmorBreak() {
+        guard let torso = sprites[.torso] else { return }
+        torso.color = SKColor(red: 0.46, green: 0.25, blue: 0.18, alpha: 1)
+        torso.colorBlendFactor = 0.28
+        for index in 0..<5 {
+            let shard = SKShapeNode(rectOf: CGSize(width: 7, height: 4), cornerRadius: 1)
+            shard.fillColor = .darkGray
+            shard.strokeColor = .yellow.withAlphaComponent(0.7)
+            shard.position = CGPoint(x: 0, y: kind.size.height * 0.14)
+            shard.zPosition = 14
+            addChild(shard)
+            let destination = CGPoint(x: CGFloat(index - 2) * 15, y: CGFloat(22 + index * 4))
+            shard.run(.sequence([.group([.move(to: destination, duration: 0.28), .rotate(byAngle: CGFloat(index - 2), duration: 0.28), .fadeOut(withDuration: 0.32)]), .removeFromParent()]))
+        }
+    }
+
+    private func playVolatileWarning() {
+        let pulse = SKAction.sequence([
+            .group([.scale(to: 1.08, duration: 0.16), .colorize(with: .orange, colorBlendFactor: 0.48, duration: 0.16)]),
+            .group([.scale(to: 1, duration: 0.18), .colorize(withColorBlendFactor: 0.08, duration: 0.18)])
+        ])
+        rig.run(.repeatForever(pulse), withKey: "volatileWarning")
+    }
+
+    func playDefeat(style: ZombieDefeatStyle = .pavement, reducedMotion: Bool, completion: @escaping () -> Void) {
         guard !isDefeated else { return }
         isDefeated = true
         isGrabbed = false
@@ -501,8 +566,21 @@ final class ZombieNode: SKNode {
         for (index, part) in parts.enumerated() {
             guard let sprite = sprites[part] else { continue }
             sprite.removeAllActions()
-            let horizontal = CGFloat((index % 2 == 0 ? 1 : -1) * (24 + index * 7))
-            let vertical = CGFloat(18 + (index % 3) * 12)
+            let styleDirection: CGFloat = switch style {
+            case .thrownOut: approachesFromLeft ? 1 : -1
+            case .collision: index.isMultiple(of: 2) ? -1 : 1
+            case .dinerAttack: approachesFromLeft ? -0.5 : 0.5
+            default: index.isMultiple(of: 2) ? 1 : -1
+            }
+            let force: CGFloat = switch style {
+            case .explosion: 1.9
+            case .weapon: 1.45
+            case .trap: 0.72
+            case .dinerAttack: 0.45
+            default: 1
+            }
+            let horizontal = styleDirection * CGFloat(24 + index * 7) * force
+            let vertical = CGFloat(18 + (index % 3) * 12) * force
             let scatter = reducedMotion ? SKAction.wait(forDuration: 0) : .group([
                 .moveBy(x: horizontal, y: vertical, duration: duration),
                 .rotate(byAngle: CGFloat(index % 2 == 0 ? 1 : -1) * (1.1 + CGFloat(index) * 0.27), duration: duration)

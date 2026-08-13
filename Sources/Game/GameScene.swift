@@ -330,13 +330,20 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func zombieReachedHouse(_ zombie: ZombieNode) {
         guard zombie.parent != nil else { return }
-        zombie.playDefeat(reducedMotion: settings.reducedMotion) {}
+        guard zombie.playDinerAttack(reducedMotion: settings.reducedMotion, completion: { [weak self, weak zombie] in
+            guard let self, let zombie, zombie.parent != nil else { return }
+            self.resolveDinerAttack(from: zombie)
+        }) else { return }
+    }
+
+    private func resolveDinerAttack(from zombie: ZombieNode) {
         health = max(0, health - zombie.kind.dinerDamage)
         combo = 0
         dinerNode?.takeHit(remainingHealth: health, maximumHealth: startingHealth)
         shakeCamera(intensity: 1.4)
         SoundManager.shared.play(.dinerHit)
         runHaptic(.heavy)
+        zombie.playDefeat(style: .dinerAttack, reducedMotion: settings.reducedMotion) {}
         if health == 0 { finish(won: false) }
     }
 
@@ -351,7 +358,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         specialCharge = min(1, specialCharge + (zombie.kind == .brute ? 0.22 : 0.12))
         let point = zombie.position
         let volatile = zombie.kind == .volatile
-        zombie.removeFromParent()
+        zombie.playDefeat(style: defeatStyle(for: reason), reducedMotion: settings.reducedMotion) {}
         burst(at: point, color: reason == .thrownOut ? .cyan : SKColor(red: 0.45, green: 0.78, blue: 0.24, alpha: 1))
         SoundManager.shared.play(.defeat, comboScale: combo)
         runHaptic(.medium)
@@ -360,6 +367,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         hitStop(duration: min(0.09, 0.045 + Double(combo) * 0.004))
         if Int.random(in: 0..<9) == 0 { spawnPickup(at: point) }
         if volatile, reason != .explosion { explodeVolatile(at: point) }
+    }
+
+    private func defeatStyle(for reason: DefeatReason) -> ZombieDefeatStyle {
+        switch reason {
+        case .impact: .pavement
+        case .collision: .collision
+        case .weapon: .weapon
+        case .trap: .trap
+        case .thrownOut: .thrownOut
+        case .explosion: .explosion
+        }
     }
 
     private func explodeVolatile(at point: CGPoint) {
