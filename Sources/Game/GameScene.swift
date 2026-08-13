@@ -239,7 +239,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         if bodies.allSatisfy({ $0.categoryBitMask == PhysicsCategory.zombie }), contact.collisionImpulse > 18 {
             for body in bodies {
-                if let zombie = body.node as? ZombieNode, zombie.damage(contact.collisionImpulse / 42) {
+                if let zombie = body.node as? ZombieNode, !zombie.isDefeated, zombie.damage(contact.collisionImpulse / 42) {
                     defeat(zombie, reason: .collision)
                 }
             }
@@ -688,9 +688,20 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         label.run(.sequence([.fadeIn(withDuration: 0.16), .wait(forDuration: 0.65), .fadeOut(withDuration: 0.28), .removeFromParent()]))
     }
 
+    /// SKAction.colorize only animates a sprite's tint, not an SKShapeNode's fillColor, so the
+    /// hit flash is a temporary red overlay instead — same technique as burst()/radialFlash().
     private func flashHouse() {
-        guard let house = world.childNode(withName: "house") else { return }
-        house.run(.sequence([.colorize(with: .red, colorBlendFactor: 0.85, duration: 0.08), .colorize(withColorBlendFactor: 0, duration: 0.22)]))
+        let flash = SKShapeNode(rect: houseFrame, cornerRadius: 10)
+        flash.fillColor = .red
+        flash.strokeColor = .clear
+        flash.alpha = 0
+        flash.zPosition = 9
+        world.addChild(flash)
+        flash.run(.sequence([
+            .fadeAlpha(to: 0.72, duration: 0.08),
+            .fadeAlpha(to: 0, duration: 0.22),
+            .removeFromParent()
+        ]))
     }
 
     private func shakeCamera(intensity: CGFloat = 1) {
