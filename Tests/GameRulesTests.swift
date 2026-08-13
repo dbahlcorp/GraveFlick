@@ -59,4 +59,11 @@ final class GameRulesTests: XCTestCase {
     func testEquipmentHasCompleteIllustratedAssetSet() {
         XCTAssertTrue(EquipmentArt.hasCompleteSet)
     }
+
+    func testEveryLevelHasAnIllustratedEnvironment() {
+        for level in GameLevel.all {
+            let environment = EnvironmentNode(levelID: level.id, sceneSize: CGSize(width: 852, height: 393), reducedMotion: true, highContrast: false)
+            XCTAssertTrue(environment.hasCompleteAsset, "Missing environment art for level \(level.id)")
+        }
+    }
 }

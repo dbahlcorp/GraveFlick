@@ -581,38 +581,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func buildSky() {
-        let moon = SKShapeNode(circleOfRadius: min(size.width, size.height) * 0.07)
-        moon.fillColor = SKColor(red: 0.94, green: 0.86, blue: 0.58, alpha: 1)
-        moon.strokeColor = .white.withAlphaComponent(0.2)
-        moon.lineWidth = 8
-        moon.position = CGPoint(x: size.width * 0.82, y: size.height * 0.76)
-        moon.glowWidth = settings.reducedMotion ? 0 : 14
-        moon.zPosition = -20
-        world.addChild(moon)
-
-        for _ in 0..<36 {
-            let star = SKShapeNode(circleOfRadius: CGFloat.random(in: 1...2.4))
-            star.fillColor = .white.withAlphaComponent(CGFloat.random(in: 0.35...0.9))
-            star.strokeColor = .clear
-            star.position = CGPoint(x: CGFloat.random(in: 20...(size.width - 20)), y: CGFloat.random(in: (groundY + 170)...(size.height - 20)))
-            star.zPosition = -30
-            if !settings.reducedMotion {
-                star.run(.repeatForever(.sequence([.fadeAlpha(to: 0.25, duration: 1.2), .fadeAlpha(to: 1, duration: 1.2)])))
-            }
-            world.addChild(star)
-        }
-
-        let skyline = SKShapeNode(rectOf: CGSize(width: size.width, height: 145))
-        skyline.fillColor = settings.highContrast ? .black : level.horizonColor
-        skyline.strokeColor = .clear
-        skyline.position = CGPoint(x: size.width / 2, y: groundY + 72)
-        skyline.zPosition = -15
-        world.addChild(skyline)
+        world.addChild(EnvironmentNode(levelID: level.id, sceneSize: size, reducedMotion: settings.reducedMotion, highContrast: settings.highContrast))
     }
 
     private func buildGround() {
         let pavement = SKShapeNode(rectOf: CGSize(width: size.width + 80, height: groundY * 2))
-        pavement.fillColor = settings.highContrast ? .black : SKColor(red: 0.10, green: 0.11, blue: 0.14, alpha: 1)
+        pavement.fillColor = (settings.highContrast ? SKColor.black : level.horizonColor).withAlphaComponent(settings.highContrast ? 0.78 : 0.18)
         pavement.strokeColor = .white.withAlphaComponent(settings.highContrast ? 0.7 : 0.18)
         pavement.lineWidth = 4
         pavement.position = CGPoint(x: size.width / 2, y: 0)
