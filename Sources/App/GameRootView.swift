@@ -1,7 +1,7 @@
 import SpriteKit
 import SwiftUI
 
-enum AppScreen {
+enum AppScreen: Equatable {
     case menu, levels, upgrades, settings, credits, game
 }
 
@@ -123,6 +123,7 @@ struct GameRootView: View {
                 }
             }
         }
+        .animation(.easeInOut(duration: model.store.settings.reducedMotion ? 0 : 0.22), value: model.screen)
         .statusBarHidden()
         .persistentSystemOverlays(.hidden)
         .onChange(of: scenePhase) { _, phase in
@@ -134,6 +135,8 @@ struct GameRootView: View {
 private struct MainMenuView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var store: ProgressStore
+    @State private var neonPulse = false
+    @State private var entered = false
 
     init(model: AppModel) {
         self.model = model
@@ -142,43 +145,60 @@ private struct MainMenuView: View {
 
     var body: some View {
         NightBackground {
-            HStack(spacing: 48) {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("GRAVE")
-                        .foregroundStyle(.white)
-                    Text("FLICK")
-                        .foregroundStyle(Color(red: 0.96, green: 0.31, blue: 0.18))
-                    Text("THE LAST LIGHT DINER\nNEVER CLOSES QUIETLY")
-                        .font(.headline.weight(.black))
-                        .tracking(2)
-                        .foregroundStyle(.white.opacity(0.64))
-                        .padding(.top, 4)
-                }
-                .font(.system(size: 72, weight: .black, design: .rounded))
-                .minimumScaleFactor(0.65)
+            GeometryReader { geometry in
+                HStack(spacing: 38) {
+                    VStack(spacing: 6) {
+                        Image("ui_graveflick_logo")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: min(geometry.size.width * 0.49, 610), height: geometry.size.height * 0.38)
+                            .accessibilityLabel("GraveFlick, Last Light Diner")
+                            .opacity(neonPulse ? 1 : 0.82)
+                            .shadow(color: .red.opacity(neonPulse ? 0.48 : 0.16), radius: neonPulse ? 18 : 6)
+                        Image("diner_complete")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: min(geometry.size.width * 0.43, 520), height: geometry.size.height * 0.32)
+                            .shadow(color: .orange.opacity(0.34), radius: 20)
+                    }
 
-                VStack(spacing: 14) {
-                    MenuButton(title: "PLAY", icon: "play.fill", color: .orange) {
-                        model.start(GameLevel.all[max(0, store.progress.highestUnlockedLevel - 1)])
+                    VStack(spacing: 7) {
+                        Text("THE LAST LIGHT DINER NEVER CLOSES QUIETLY")
+                            .font(.caption.weight(.black))
+                            .tracking(1.8)
+                            .foregroundStyle(.white.opacity(0.72))
+                            .multilineTextAlignment(.center)
+                        MenuButton(title: "PLAY", icon: "play.fill", color: .orange) {
+                            model.start(GameLevel.all[max(0, store.progress.highestUnlockedLevel - 1)])
+                        }
+                        MenuButton(title: "LEVELS", icon: "map.fill", color: .cyan) { model.screen = .levels }
+                        MenuButton(title: "UPGRADES", icon: "wrench.and.screwdriver.fill", color: .purple) { model.screen = .upgrades }
+                        MenuButton(title: "SETTINGS", icon: "gearshape.fill", color: .gray) { model.screen = .settings }
+                        MenuButton(title: "CREDITS", icon: "info.circle.fill", color: .indigo) { model.screen = .credits }
+                        HStack(spacing: 8) {
+                            Image(systemName: "bolt.circle.fill").foregroundStyle(.yellow)
+                            Text("\(store.progress.currency) NIGHT COINS")
+                        }
+                        .font(.caption.weight(.black))
+                        .foregroundStyle(.white.opacity(0.82))
+                        Text(store.dailySummary)
+                            .font(.caption2.weight(.black))
+                            .foregroundStyle(store.progress.dailyClaimed ? .green : .cyan)
                     }
-                    MenuButton(title: "LEVELS", icon: "map.fill", color: .cyan) { model.screen = .levels }
-                    MenuButton(title: "UPGRADES", icon: "wrench.and.screwdriver.fill", color: .purple) { model.screen = .upgrades }
-                    MenuButton(title: "SETTINGS", icon: "gearshape.fill", color: .gray) { model.screen = .settings }
-                    MenuButton(title: "CREDITS", icon: "info.circle.fill", color: .indigo) { model.screen = .credits }
-                    HStack {
-                        Image(systemName: "bolt.circle.fill").foregroundStyle(.yellow)
-                        Text("\(store.progress.currency) NIGHT COINS")
-                    }
-                    .font(.caption.weight(.black))
-                    .foregroundStyle(.white.opacity(0.72))
-                    .padding(.top, 6)
-                    Text(store.dailySummary)
-                        .font(.caption2.weight(.black))
-                        .foregroundStyle(store.progress.dailyClaimed ? .green : .cyan)
+                    .frame(maxWidth: 390)
+                    .roadsidePanel(padding: 10)
+                    .offset(x: entered ? 0 : 34)
+                    .opacity(entered ? 1 : 0)
                 }
-                .frame(maxWidth: 390)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .padding(46)
+            .padding(.horizontal, 30)
+            .padding(.vertical, 18)
+        }
+        .onAppear {
+            guard !store.settings.reducedMotion else { entered = true; neonPulse = true; return }
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) { entered = true }
+            withAnimation(.easeInOut(duration: 1.25).repeatForever(autoreverses: true)) { neonPulse = true }
         }
     }
 }
@@ -217,9 +237,7 @@ private struct CreditsView: View {
                         ForEach(achievements, id: \.0) { item in
                             let unlocked = store.progress.achievements.contains(item.0)
                             HStack {
-                                Image(systemName: unlocked ? "trophy.fill" : "lock.fill")
-                                    .foregroundStyle(unlocked ? .yellow : .white.opacity(0.3))
-                                    .frame(width: 30)
+                                RoadsideIcon(systemName: unlocked ? "trophy.fill" : "lock.fill", color: unlocked ? .yellow : .gray)
                                 VStack(alignment: .leading) {
                                     Text(item.1).font(.subheadline.weight(.black))
                                     Text(item.2).font(.caption2).foregroundStyle(.white.opacity(0.55))
@@ -246,7 +264,7 @@ private struct LevelSelectView: View {
 
     var body: some View {
         NightBackground {
-            VStack(spacing: 18) {
+            VStack(spacing: 10) {
                 ScreenHeader(title: "NIGHT ROUTE", subtitle: "Five stops. One glowing diner.") { model.screen = .menu }
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 16) {
@@ -256,12 +274,24 @@ private struct LevelSelectView: View {
                                 if unlocked { model.start(level) }
                             } label: {
                                 VStack(alignment: .leading, spacing: 12) {
+                                    Image(level.environmentAssetName)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(height: 60)
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                        .overlay(alignment: .topLeading) {
+                                            Text("NIGHT 0\(level.id)")
+                                                .font(.caption2.weight(.black))
+                                                .padding(.horizontal, 8).padding(.vertical, 5)
+                                                .background(.black.opacity(0.72), in: Capsule())
+                                                .padding(7)
+                                        }
+                                        .saturation(unlocked ? 1 : 0)
                                     HStack {
-                                        Text("0\(level.id)").font(.title2.weight(.black))
+                                        Text(level.title).font(.headline.weight(.black))
                                         Spacer()
                                         Image(systemName: unlocked ? "moon.stars.fill" : "lock.fill")
                                     }
-                                    Text(level.title).font(.title3.weight(.black))
                                     Text(level.subtitle).font(.caption).foregroundStyle(.white.opacity(0.6))
                                     Spacer()
                                     Text(String(repeating: "★", count: store.progress.stars[level.id, default: 0]))
@@ -273,9 +303,10 @@ private struct LevelSelectView: View {
                                 }
                                 .foregroundStyle(unlocked ? .white : .white.opacity(0.38))
                                 .padding(20)
-                                .frame(width: 210, height: 230)
-                                .background(level.id == store.progress.highestUnlockedLevel ? Color.orange.opacity(0.24) : Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 22))
-                                .overlay(RoundedRectangle(cornerRadius: 22).stroke(unlocked ? Color.white.opacity(0.18) : Color.clear))
+                                .frame(width: 220, height: 220)
+                                .background(Color.black.opacity(0.72), in: RoundedRectangle(cornerRadius: 22))
+                                .overlay(RoundedRectangle(cornerRadius: 22).stroke(level.id == store.progress.highestUnlockedLevel ? Color.orange : Color.white.opacity(unlocked ? 0.22 : 0.08), lineWidth: level.id == store.progress.highestUnlockedLevel ? 2 : 1))
+                                .shadow(color: level.id == store.progress.highestUnlockedLevel ? .orange.opacity(0.25) : .clear, radius: 12)
                             }
                             .buttonStyle(.plain)
                             .disabled(!unlocked)
@@ -285,7 +316,7 @@ private struct LevelSelectView: View {
                     .padding(.horizontal, 4)
                 }
             }
-            .padding(32)
+            .padding(18)
         }
     }
 }
@@ -342,7 +373,13 @@ private struct UpgradeShopView: View {
 
     private func cardContent(title: String, detail: String, footer: String, icon: String) -> some View {
         HStack(spacing: 15) {
-            Image(systemName: icon).font(.title).foregroundStyle(.orange).frame(width: 42)
+            Group {
+                if icon.hasPrefix("weapon_") || icon.hasPrefix("trap_") {
+                    RoadsideIcon(imageName: icon, color: .orange)
+                } else {
+                    RoadsideIcon(systemName: icon, color: .orange)
+                }
+            }
             VStack(alignment: .leading, spacing: 4) {
                 Text(title).font(.headline.weight(.black))
                 Text(detail).font(.caption).foregroundStyle(.white.opacity(0.62))
@@ -429,6 +466,7 @@ private struct GameContainerView: View {
     @ObservedObject var store: ProgressStore
     @State private var showsSettings = false
     @State private var lowHealthPulse = false
+    @State private var tutorialGesture = false
 
     var body: some View {
         ZStack {
@@ -491,6 +529,9 @@ private struct GameContainerView: View {
             .disabled(session.specialCharge < 1)
             .accessibilityLabel("Grave Time special ability, \(Int(session.specialCharge * 100)) percent charged")
         }
+        .padding(7)
+        .background(.black.opacity(0.48), in: RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color(red: 0.28, green: 0.63, blue: 0.62).opacity(0.55)))
     }
 
     private var actionBar: some View {
@@ -505,6 +546,9 @@ private struct GameContainerView: View {
                 CooldownButton(title: trap.title, icon: trap.icon, remaining: session.trapCooldowns[trap, default: 0]) { session.use(trap) }
             }
         }
+        .padding(7)
+        .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 18))
+        .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.orange.opacity(0.38)))
     }
 
     /// A pop animation + audible ping fires exactly once when `remaining` crosses from cooling
@@ -519,12 +563,26 @@ private struct GameContainerView: View {
         var body: some View {
             Button(action: action) {
                 VStack(spacing: 2) {
-                    Image(systemName: icon).font(.headline)
+                    Image(icon)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 28, height: 25)
                     Text(remaining > 0 ? "\(Int(ceil(remaining)))" : title.uppercased())
                         .font(.system(size: 8, weight: .black))
                         .lineLimit(1)
                 }
                 .frame(minWidth: 62, minHeight: 46)
+                .overlay(alignment: .bottom) {
+                    if remaining > 0 {
+                        GeometryReader { proxy in
+                            Rectangle()
+                                .fill(Color.cyan.opacity(0.8))
+                                .frame(width: proxy.size.width * min(1, remaining / 10), height: 3)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(height: 3)
+                    }
+                }
             }
             .hudButton(active: remaining <= 0)
             .disabled(remaining > 0)
@@ -558,22 +616,39 @@ private struct GameContainerView: View {
 
     private var tutorial: some View {
         ModalCard {
+            Image("ui_graveflick_logo").resizable().scaledToFit().frame(width: 260, height: 108)
             Text("YOUR FIRST NIGHT").font(.title.weight(.black))
             HStack(spacing: 24) {
-                tutorialStep("1", "GRAB", "Touch and hold any creature")
-                tutorialStep("2", "FLICK", "Drag quickly and release")
-                tutorialStep("3", "SLAM", "Use height and pavement impact")
+                tutorialStep("1", "GRAB", "Touch and hold any creature", icon: "hand.tap.fill", motion: .scale)
+                tutorialStep("2", "FLICK", "Drag quickly and release", icon: "hand.draw.fill", motion: .horizontal)
+                tutorialStep("3", "SLAM", "Use height and pavement impact", icon: "arrow.down.to.line.compact", motion: .vertical)
             }
             Text("Weapons and traps recharge automatically. Defeats charge Grave Time.")
                 .font(.caption).foregroundStyle(.white.opacity(0.65))
             Button("START NIGHT") { session.dismissTutorial(store: store) }
                 .buttonStyle(.borderedProminent).tint(.orange).controlSize(.large)
         }
+        .onAppear {
+            guard !store.settings.reducedMotion else { return }
+            withAnimation(.easeInOut(duration: 0.72).repeatForever(autoreverses: true)) { tutorialGesture = true }
+        }
     }
 
-    private func tutorialStep(_ number: String, _ title: String, _ detail: String) -> some View {
+    private enum TutorialMotion { case scale, horizontal, vertical }
+
+    private func tutorialStep(_ number: String, _ title: String, _ detail: String, icon: String, motion: TutorialMotion) -> some View {
         VStack(spacing: 6) {
-            Text(number).font(.title2.weight(.black)).foregroundStyle(.orange)
+            ZStack {
+                Circle().fill(Color.orange.opacity(0.20)).frame(width: 48, height: 48)
+                Image(systemName: icon).font(.title2.weight(.bold)).foregroundStyle(.orange)
+            }
+            .scaleEffect(motion == .scale && tutorialGesture ? 1.18 : 1)
+            .offset(x: motion == .horizontal && tutorialGesture ? 15 : 0,
+                    y: motion == .vertical && tutorialGesture ? 13 : 0)
+            .overlay(alignment: .topLeading) {
+                Text(number).font(.caption2.weight(.black)).foregroundStyle(.white)
+                    .frame(width: 20, height: 20).background(.red, in: Circle()).offset(x: -4, y: -4)
+            }
             Text(title).font(.headline.weight(.black))
             Text(detail).font(.caption).foregroundStyle(.white.opacity(0.62)).multilineTextAlignment(.center)
         }
@@ -598,7 +673,9 @@ private struct GameContainerView: View {
     }
 
     private func resultModal(_ result: LevelResult) -> some View {
-        ModalCard {
+        ModalCard(animated: !store.settings.reducedMotion) {
+            Image(result.won ? "diner_complete" : "diner_destroyed")
+                .resizable().scaledToFit().frame(width: 280, height: 145)
             Text(result.won ? "LOT CLEARED" : "DINER OVERRUN").font(.title.weight(.black))
             Text(String(repeating: "★", count: result.stars) + String(repeating: "☆", count: 3 - result.stars))
                 .font(.largeTitle).foregroundStyle(.yellow)
@@ -622,9 +699,13 @@ private struct NightBackground<Content: View>: View {
     @ViewBuilder let content: () -> Content
     var body: some View {
         ZStack {
-            LinearGradient(colors: [Color(red: 0.025, green: 0.035, blue: 0.085), Color(red: 0.12, green: 0.055, blue: 0.10)], startPoint: .topLeading, endPoint: .bottomTrailing)
+            Image("environment_01_closing_time")
+                .resizable()
+                .scaledToFill()
                 .ignoresSafeArea()
-            Circle().fill(Color.cyan.opacity(0.09)).frame(width: 420).blur(radius: 70).offset(x: 320, y: -160)
+            LinearGradient(colors: [.black.opacity(0.18), Color(red: 0.02, green: 0.025, blue: 0.06).opacity(0.78)], startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
+            Rectangle().fill(.black.opacity(0.18)).ignoresSafeArea()
             content()
         }
         .foregroundStyle(.white)
@@ -644,6 +725,7 @@ private struct ScreenHeader: View {
             }
             Spacer()
         }
+        .roadsidePanel(padding: 12)
     }
 }
 
@@ -662,30 +744,86 @@ private struct MenuButton: View {
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 20)
-            .frame(height: 56)
-            .background(color.opacity(0.30), in: RoundedRectangle(cornerRadius: 17))
-            .overlay(RoundedRectangle(cornerRadius: 17).stroke(color.opacity(0.7)))
+            .frame(height: 48)
+            .background(LinearGradient(colors: [color.opacity(0.44), Color.black.opacity(0.68)], startPoint: .top, endPoint: .bottom), in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(color.opacity(0.88), lineWidth: 1.5))
+            .shadow(color: color.opacity(0.2), radius: 7)
         }
         .buttonStyle(.plain)
     }
 }
 
+private struct RoadsideIcon: View {
+    var imageName: String?
+    var systemName: String?
+    let color: Color
+
+    init(imageName: String, color: Color) {
+        self.imageName = imageName
+        systemName = nil
+        self.color = color
+    }
+
+    init(systemName: String, color: Color) {
+        imageName = nil
+        self.systemName = systemName
+        self.color = color
+    }
+
+    var body: some View {
+        Group {
+            if let imageName {
+                Image(imageName).resizable().scaledToFit().padding(7)
+            } else if let systemName {
+                Image(systemName: systemName).font(.title2.weight(.bold))
+            }
+        }
+        .foregroundStyle(color)
+        .frame(width: 48, height: 48)
+        .background(LinearGradient(colors: [color.opacity(0.24), .black.opacity(0.74)], startPoint: .top, endPoint: .bottom), in: RoundedRectangle(cornerRadius: 11))
+        .overlay(RoundedRectangle(cornerRadius: 11).stroke(color.opacity(0.72)))
+        .shadow(color: color.opacity(0.18), radius: 5)
+    }
+}
+
 private struct ModalCard<Content: View>: View {
     @ViewBuilder let content: () -> Content
+    var animated = true
+    @State private var presented = false
+
+    init(animated: Bool = true, @ViewBuilder content: @escaping () -> Content) {
+        self.animated = animated
+        self.content = content
+    }
+
     var body: some View {
         ZStack {
             Color.black.opacity(0.67).ignoresSafeArea()
             VStack(spacing: 17) { content() }
                 .foregroundStyle(.white)
                 .padding(32)
-                .background(Color(red: 0.07, green: 0.08, blue: 0.14), in: RoundedRectangle(cornerRadius: 26))
-                .overlay(RoundedRectangle(cornerRadius: 26).stroke(.white.opacity(0.18)))
+                .background(LinearGradient(colors: [Color(red: 0.12, green: 0.13, blue: 0.16), Color(red: 0.035, green: 0.045, blue: 0.07)], startPoint: .top, endPoint: .bottom), in: RoundedRectangle(cornerRadius: 20))
+                .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color(red: 0.33, green: 0.72, blue: 0.69).opacity(0.62), lineWidth: 2))
                 .shadow(radius: 30)
+                .scaleEffect(presented ? 1 : 0.82)
+                .opacity(presented ? 1 : 0)
+        }
+        .onAppear {
+            if animated { withAnimation(.spring(response: 0.38, dampingFraction: 0.72)) { presented = true } }
+            else { presented = true }
         }
     }
 }
 
 private extension View {
+    func roadsidePanel(padding: CGFloat) -> some View {
+        self
+            .padding(padding)
+            .background(LinearGradient(colors: [Color(red: 0.16, green: 0.16, blue: 0.17).opacity(0.94), Color(red: 0.035, green: 0.045, blue: 0.055).opacity(0.96)], startPoint: .top, endPoint: .bottom), in: RoundedRectangle(cornerRadius: 18))
+            .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color(red: 0.30, green: 0.65, blue: 0.63).opacity(0.62), lineWidth: 1.5))
+            .shadow(color: .black.opacity(0.5), radius: 14, y: 7)
+    }
+
     func hudButton(active: Bool = true) -> some View {
         self
             .foregroundStyle(active ? Color.white : Color.white.opacity(0.46))

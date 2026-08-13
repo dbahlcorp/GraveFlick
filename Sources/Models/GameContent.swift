@@ -16,9 +16,9 @@ enum WeaponKind: String, CaseIterable, Codable, Identifiable {
     }
     var icon: String {
         switch self {
-        case .bowlingBall: "circle.inset.filled"
-        case .shotgun: "scope"
-        case .airstrike: "airplane"
+        case .bowlingBall: "weapon_bowling_ball"
+        case .shotgun: "weapon_scatterblast"
+        case .airstrike: "weapon_airstrike_beacon"
         }
     }
     var cooldown: TimeInterval {
@@ -43,7 +43,7 @@ enum TrapKind: String, CaseIterable, Codable, Identifiable {
 
     var id: String { rawValue }
     var title: String { self == .spikeStrip ? "Spike Strip" : "Flash Freezer" }
-    var icon: String { self == .spikeStrip ? "triangle.fill" : "snowflake" }
+    var icon: String { self == .spikeStrip ? "trap_spike_strip" : "trap_flash_freezer" }
     var cooldown: TimeInterval { self == .spikeStrip ? 15 : 22 }
     var unlockCost: Int { self == .spikeStrip ? 300 : 650 }
 }
@@ -89,6 +89,17 @@ struct GameLevel: Identifiable, Hashable {
     let enemyRoster: [ZombieKind]
     let skyColor: SKColor
     let horizonColor: SKColor
+
+    var environmentAssetName: String {
+        let slug = switch id {
+        case 1: "closing_time"
+        case 2: "freeway_hunger"
+        case 3: "hard_hats"
+        case 4: "pressure_cooker"
+        default: "last_light"
+        }
+        return String(format: "environment_%02d_%@", id, slug)
+    }
 
     static let all: [GameLevel] = [
         GameLevel(id: 1, title: "Closing Time", subtitle: "Learn the night shift", totalWaves: 3, waveDuration: 15, baseSpawnInterval: 1.65, reward: 180, enemyRoster: [.walker, .runner], skyColor: color(8, 12, 29), horizonColor: color(22, 31, 55)),

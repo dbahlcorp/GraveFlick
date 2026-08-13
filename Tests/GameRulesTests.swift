@@ -1,4 +1,5 @@
 import CoreGraphics
+import UIKit
 import XCTest
 @testable import GraveFlick
 
@@ -38,5 +39,42 @@ final class GameRulesTests: XCTestCase {
     func testRapidGearCooldownHasFloor() {
         XCTAssertEqual(GameRules.cooldown(base: 10, rapidGearLevel: 2), 8.4, accuracy: 0.001)
         XCTAssertEqual(GameRules.cooldown(base: 10, rapidGearLevel: 99), 6.8, accuracy: 0.001)
+    }
+
+    func testEveryZombieHasACompleteSixPartAnimationRig() {
+        XCTAssertTrue(ZombieNode.hasCompleteStateAnimationSet)
+        for kind in ZombieKind.allCases {
+            let zombie = ZombieNode(kind: kind, approachesFromLeft: true)
+            XCTAssertTrue(zombie.hasCompleteAnimationRig, "Missing articulated animation art for \(kind.rawValue)")
+        }
+    }
+
+    func testDinerHasCompleteAnimatedAsset() {
+        let diner = DinerNode(
+            frame: CGRect(x: 0, y: 0, width: 260, height: 250),
+            reducedMotion: true,
+            highContrast: false
+        )
+        XCTAssertTrue(diner.hasCompleteAssetSet)
+    }
+
+    func testEquipmentHasCompleteIllustratedAssetSet() {
+        XCTAssertTrue(EquipmentArt.hasCompleteSet)
+    }
+
+    func testEveryLevelHasAnIllustratedEnvironment() {
+        for level in GameLevel.all {
+            let environment = EnvironmentNode(levelID: level.id, sceneSize: CGSize(width: 852, height: 393), reducedMotion: true, highContrast: false)
+            XCTAssertTrue(environment.hasCompleteAsset, "Missing environment art for level \(level.id)")
+        }
+    }
+
+    func testCombatVFXHasCompleteAuthoredAssetSet() {
+        XCTAssertTrue(CombatVFX.hasCompleteSet)
+    }
+
+    func testProductionUIHasCompleteAuthoredAssetSet() {
+        XCTAssertTrue(UIArt.hasCompleteSet)
+        XCTAssertTrue(GameLevel.all.allSatisfy { UIImage(named: $0.environmentAssetName) != nil })
     }
 }
