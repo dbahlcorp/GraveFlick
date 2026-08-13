@@ -525,8 +525,8 @@ private struct GameContainerView: View {
             Button { session.togglePause() } label: { Image("ui_pause").resizable().scaledToFit().frame(width: 25, height: 25) }
                 .hudButton()
             stat("SCORE", "\(session.score)", icon: "ui_star", color: .yellow)
-            stat("WAVE", session.level.isEndless ? "\(session.wave)" : "\(session.wave)/\(session.level.totalWaves)", icon: "ui_achievement", color: .cyan)
-            stat("DINER", String(repeating: "♥", count: session.health), icon: "ui_upgrade_diner", color: .red)
+            stat("WAVE", session.level.isEndless ? "\(session.wave)" : "\(session.wave)/\(session.level.totalWaves)", icon: "ui_moon", color: .cyan)
+            stat("DINER", String(repeating: "♥", count: session.health), icon: "ui_heart", color: .red)
             Spacer()
             Button { session.useSpecial() } label: {
                 HStack(spacing: 8) {

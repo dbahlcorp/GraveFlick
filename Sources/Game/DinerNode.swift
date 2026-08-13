@@ -238,6 +238,11 @@ final class DinerNode: SKNode {
             ]), withKey: "collapse")
             emitDebris()
             startEmbers()
+            // Stop the idle frame loops first — they run forever and would otherwise overwrite
+            // this destroyed-stage texture on their very next tick.
+            marqueeArt.removeAction(forKey: "marqueeFrames")
+            doorArt.removeAction(forKey: "doorFrames")
+            ventArt.removeAction(forKey: "ventFrames")
             marqueeArt.texture = SKTexture(imageNamed: "diner_marquee_4")
             doorArt.texture = SKTexture(imageNamed: "diner_door_4")
             ventArt.texture = SKTexture(imageNamed: "diner_vent_4")
