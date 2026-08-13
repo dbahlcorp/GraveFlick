@@ -81,6 +81,27 @@ final class GameRulesTests: XCTestCase {
         XCTAssertEqual(GameRules.storyBossKind(levelID: 5, wave: 6, totalWaves: 6), .colossus)
     }
 
+    func testDifficultyProfilesChangePressureAndRewards() {
+        XCTAssertLessThan(GameDifficulty.casual.enemySpeed, GameDifficulty.standard.enemySpeed)
+        XCTAssertGreaterThan(GameDifficulty.nightmare.enemyHealth, GameDifficulty.standard.enemyHealth)
+        XCTAssertGreaterThan(GameDifficulty.nightmare.rewardMultiplier, GameDifficulty.standard.rewardMultiplier)
+    }
+
+    func testCampaignIncludesFifteenDistinctChallengeRules() {
+        XCTAssertEqual(GameLevel.challenges.count, 15)
+        XCTAssertTrue(GameLevel.challenges.contains { $0.modifier == .noGrab })
+        XCTAssertTrue(GameLevel.challenges.contains { $0.modifier == .volatileRush })
+        XCTAssertTrue(GameLevel.challenges.contains { $0.modifier == .suddenDeath })
+        XCTAssertTrue(GameLevel.sandbox.isSandbox)
+    }
+
+    func testBossesRequireAStunBeforeTheyCanBeGrabbed() {
+        let boss = ZombieNode(kind: .butcher, approachesFromLeft: true)
+        XCTAssertFalse(boss.canBeGrabbed)
+        _ = boss.damage(ZombieKind.butcher.hitPoints * 0.13)
+        XCTAssertTrue(boss.canBeGrabbed)
+    }
+
     func testSurvivalDifficultyKeepsScalingAndAddsBossPressure() {
         let waveOne = GameRules.survivalDifficulty(wave: 1)
         let waveTen = GameRules.survivalDifficulty(wave: 10)

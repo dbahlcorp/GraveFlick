@@ -29,7 +29,7 @@ final class ProgressStore: ObservableObject {
         if result.won || result.reward > 0 {
             progress.currency += result.reward
         }
-        if result.won {
+        if result.won, GameLevel.all.indices.contains(result.levelID - 1) {
             progress.highestUnlockedLevel = min(GameLevel.all.count, max(progress.highestUnlockedLevel, result.levelID + 1))
         }
         var newAchievements: [String] = []
@@ -57,6 +57,20 @@ final class ProgressStore: ObservableObject {
         guard progress.currency >= cost else { return false }
         progress.currency -= cost
         progress.upgradeLevels[kind.rawValue] = level + 1
+        saveProgress()
+        return true
+    }
+
+    @discardableResult
+    func buyWeaponUpgrade(_ kind: WeaponKind) -> Bool {
+        guard progress.isUnlocked(kind) else { return false }
+        let key = "weapon.\(kind.rawValue)"
+        let level = progress.upgradeLevels[key, default: 0]
+        guard level < 3 else { return false }
+        let cost = 200 + level * 275
+        guard progress.currency >= cost else { return false }
+        progress.currency -= cost
+        progress.upgradeLevels[key] = level + 1
         saveProgress()
         return true
     }

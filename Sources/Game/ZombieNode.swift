@@ -206,9 +206,13 @@ final class ZombieNode: SKNode {
     private var freezeOverlay: SKNode?
     private var state: ZombieAnimationState = .walking
     var onHealthChanged: ((CGFloat) -> Void)?
+    private(set) var bossIsStunned = false
+    private var bossStunDamage: CGFloat = 0
+    private var abilityTime: TimeInterval = 0
 
     var currentAnimationState: ZombieAnimationState { state }
     var healthFraction: CGFloat { max(0, health / maximumHealth) }
+    var canBeGrabbed: Bool { !kind.isBoss || bossIsStunned }
 
     var hasCompleteAnimationRig: Bool {
         sprites.count == RigPart.allCases.count && sprites.values.allSatisfy {
@@ -359,6 +363,16 @@ final class ZombieNode: SKNode {
         if slowTime > 0 { slowTime -= deltaTime }
         if hitReactionTime > 0 { hitReactionTime -= deltaTime }
         guard !isDefeated else { return }
+        abilityTime += deltaTime
+        if kind == .waitress, abilityTime >= 2.4, state == .walking {
+            abilityTime = 0
+            position.x += (approachesFromLeft ? 1 : -1) * 34
+            if !reducedMotion { rig.run(.sequence([.moveBy(x: 0, y: 28, duration: 0.12), .moveBy(x: 0, y: -28, duration: 0.16)])) }
+        } else if kind == .groundskeeper, abilityTime >= 3.8, state == .walking {
+            abilityTime = 0
+            slowTime = -0.75
+            if !reducedMotion { rig.run(.sequence([.rotate(byAngle: 0.08, duration: 0.12), .rotate(byAngle: -0.08, duration: 0.12)])) }
+        }
 
         if state == .airborne || isThrown {
             highestPoint = max(highestPoint, position.y)
@@ -449,7 +463,10 @@ final class ZombieNode: SKNode {
     }
 
     func beginGrab(reducedMotion: Bool) {
-        guard !isDefeated else { return }
+        guard !isDefeated, canBeGrabbed else {
+            if kind.isBoss { rig.run(.sequence([.colorize(with: .red, colorBlendFactor: 0.65, duration: 0.08), .colorize(withColorBlendFactor: 0, duration: 0.14)])) }
+            return
+        }
         isGrabbed = true
         isThrown = false
         state = .grabbed
@@ -636,6 +653,20 @@ final class ZombieNode: SKNode {
     func damage(_ amount: CGFloat) -> Bool {
         guard !isDefeated else { return true }
         health -= amount
+        if kind.isBoss, !bossIsStunned {
+            bossStunDamage += amount
+            if bossStunDamage >= maximumHealth * 0.12 {
+                bossIsStunned = true
+                bossStunDamage = 0
+                slowTime = 4
+                rig.color = .cyan
+                rig.colorBlendFactor = 0.28
+                run(.sequence([.wait(forDuration: 4), .run { [weak self] in
+                    self?.bossIsStunned = false
+                    self?.rig.colorBlendFactor = 0
+                }]), withKey: "bossStun")
+            }
+        }
         onHealthChanged?(healthFraction)
         healthBar.isHidden = false
         healthBar.xScale = max(0.05, health / maximumHealth)
@@ -747,6 +778,23 @@ final class ZombieNode: SKNode {
             .run(completion),
             .removeFromParent()
         ]), withKey: "defeat")
+    }
+
+    func makePhysicsDebris() -> [SKSpriteNode] {
+        RigPart.allCases.compactMap { part in
+            guard let source = sprites[part], let texture = source.texture else { return nil }
+            let debris = SKSpriteNode(texture: texture, size: source.size)
+            debris.position = convert(source.position, from: rig)
+            debris.zRotation = source.zRotation + zRotation
+            debris.xScale = xScale
+            debris.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: source.size.width * 0.7, height: source.size.height * 0.7))
+            debris.physicsBody?.mass = kind.isBoss ? 0.9 : 0.38
+            debris.physicsBody?.restitution = 0.46
+            debris.physicsBody?.friction = 0.8
+            debris.physicsBody?.categoryBitMask = PhysicsCategory.none
+            debris.physicsBody?.collisionBitMask = PhysicsCategory.ground | PhysicsCategory.boundary
+            return debris
+        }
     }
 
     func slow(for duration: TimeInterval, reducedMotion: Bool = false) {

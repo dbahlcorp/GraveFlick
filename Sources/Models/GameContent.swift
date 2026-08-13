@@ -5,6 +5,10 @@ enum WeaponKind: String, CaseIterable, Codable, Identifiable {
     case bowlingBall
     case shotgun
     case airstrike
+    case anvil
+    case grenade
+    case propaneTank
+    case wreckingBall
 
     var id: String { rawValue }
     var title: String {
@@ -12,6 +16,10 @@ enum WeaponKind: String, CaseIterable, Codable, Identifiable {
         case .bowlingBall: "Bowling Ball"
         case .shotgun: "Scatterblast"
         case .airstrike: "Neon Airstrike"
+        case .anvil: "Drop Anvil"
+        case .grenade: "Grave Grenade"
+        case .propaneTank: "Propane Roller"
+        case .wreckingBall: "Wrecking Ball"
         }
     }
     var icon: String {
@@ -19,6 +27,8 @@ enum WeaponKind: String, CaseIterable, Codable, Identifiable {
         case .bowlingBall: "weapon_bowling_ball"
         case .shotgun: "weapon_scatterblast"
         case .airstrike: "weapon_airstrike_beacon"
+        case .anvil, .wreckingBall: "weapon_bowling_ball"
+        case .grenade, .propaneTank: "weapon_airstrike_beacon"
         }
     }
     var cooldown: TimeInterval {
@@ -26,6 +36,10 @@ enum WeaponKind: String, CaseIterable, Codable, Identifiable {
         case .bowlingBall: 7
         case .shotgun: 11
         case .airstrike: 28
+        case .anvil: 13
+        case .grenade: 15
+        case .propaneTank: 18
+        case .wreckingBall: 24
         }
     }
     var unlockCost: Int {
@@ -33,6 +47,38 @@ enum WeaponKind: String, CaseIterable, Codable, Identifiable {
         case .bowlingBall: 0
         case .shotgun: 450
         case .airstrike: 900
+        case .anvil: 350
+        case .grenade: 525
+        case .propaneTank: 700
+        case .wreckingBall: 1_100
+        }
+    }
+}
+
+enum GameDifficulty: String, CaseIterable, Codable, Identifiable {
+    case casual, standard, nightmare
+    var id: String { rawValue }
+    var title: String { rawValue.uppercased() }
+    var enemySpeed: CGFloat { self == .casual ? 0.82 : (self == .nightmare ? 1.24 : 1) }
+    var enemyHealth: CGFloat { self == .casual ? 0.78 : (self == .nightmare ? 1.38 : 1) }
+    var spawnRate: Double { self == .casual ? 1.22 : (self == .nightmare ? 0.78 : 1) }
+    var rewardMultiplier: Double { self == .casual ? 0.85 : (self == .nightmare ? 1.45 : 1) }
+}
+
+enum MissionModifier: String, Hashable {
+    case standard, leftOnly, rightOnly, doubleSided, noGrab, volatileRush, waitressRush, limitedWeapons, lowGravity, suddenDeath
+    var title: String {
+        switch self {
+        case .standard: "Standard Shift"
+        case .leftOnly: "Left-Side Lockdown"
+        case .rightOnly: "Right-Side Lockdown"
+        case .doubleSided: "Two-Sided Siege"
+        case .noGrab: "Hands Off"
+        case .volatileRush: "Pressure Leak"
+        case .waitressRush: "Last Call Rush"
+        case .limitedWeapons: "Bare Essentials"
+        case .lowGravity: "Moonlight Gravity"
+        case .suddenDeath: "One Heart Night"
         }
     }
 }
@@ -90,17 +136,21 @@ struct GameLevel: Identifiable, Hashable {
     let skyColor: SKColor
     let horizonColor: SKColor
     var isEndless = false
+    var isSandbox = false
+    var environmentID: Int? = nil
+    var modifier: MissionModifier = .standard
 
     var environmentAssetName: String {
-        if isEndless { return "environment_05_last_light" }
-        let slug = switch id {
+        if isEndless || isSandbox { return "environment_05_last_light" }
+        let visualID = environmentID ?? id
+        let slug = switch visualID {
         case 1: "closing_time"
         case 2: "freeway_hunger"
         case 3: "hard_hats"
         case 4: "pressure_cooker"
         default: "last_light"
         }
-        return String(format: "environment_%02d_%@", id, slug)
+        return String(format: "environment_%02d_%@", visualID, slug)
     }
 
     static let all: [GameLevel] = [
@@ -127,6 +177,38 @@ struct GameLevel: Identifiable, Hashable {
         isEndless: true
     )
 
+    static let challenges: [GameLevel] = [
+        challenge(101, "West Door Panic", 1, .leftOnly, [.walker, .waitress]),
+        challenge(102, "East Lot Stampede", 1, .rightOnly, [.runner, .waitress]),
+        challenge(103, "Split Service", 2, .doubleSided, [.walker, .runner, .crawler]),
+        challenge(104, "Hands Off", 2, .noGrab, [.walker, .groundskeeper, .armored]),
+        challenge(105, "Waitress Rush", 1, .waitressRush, [.waitress]),
+        challenge(106, "Pressure Leak", 4, .volatileRush, [.volatile]),
+        challenge(107, "Bare Essentials", 3, .limitedWeapons, [.riot, .armored, .brute]),
+        challenge(108, "Moon Toss", 5, .lowGravity, regularCasesForChallenge),
+        challenge(109, "One Heart Night", 4, .suddenDeath, [.runner, .volatile, .riot]),
+        challenge(110, "Double-Sided Brutes", 3, .doubleSided, [.brute, .groundskeeper]),
+        challenge(111, "Neon Riot", 5, .standard, [.riot, .colossus]),
+        challenge(112, "Kitchen Nightmare", 4, .standard, [.waitress, .butcher]),
+        challenge(113, "Crawler Moon", 2, .lowGravity, [.crawler, .volatile]),
+        challenge(114, "Armored Closing", 3, .noGrab, [.armored, .riot]),
+        challenge(115, "Last Light Gauntlet", 5, .doubleSided, ZombieKind.regularCases)
+    ]
+
+    static let sandbox = GameLevel(
+        id: -1, title: "Midnight Laboratory", subtitle: "Unlimited health and full control", totalWaves: .max,
+        waveDuration: 999_999, baseSpawnInterval: 999_999, reward: 0, enemyRoster: ZombieKind.regularCases,
+        skyColor: color(4, 8, 22), horizonColor: color(18, 41, 57), isSandbox: true
+    )
+
+    private static var regularCasesForChallenge: [ZombieKind] { [.walker, .runner, .waitress, .groundskeeper, .volatile] }
+
+    private static func challenge(_ id: Int, _ title: String, _ environmentID: Int, _ modifier: MissionModifier, _ roster: [ZombieKind]) -> GameLevel {
+        GameLevel(id: id, title: title, subtitle: modifier.title, totalWaves: 4, waveDuration: 16, baseSpawnInterval: 1.18,
+                  reward: 360, enemyRoster: roster, skyColor: color(7, 11, 26), horizonColor: color(28, 36, 52),
+                  environmentID: environmentID, modifier: modifier)
+    }
+
     private static func color(_ red: CGFloat, _ green: CGFloat, _ blue: CGFloat) -> SKColor {
         SKColor(red: red / 255, green: green / 255, blue: blue / 255, alpha: 1)
     }
@@ -138,6 +220,25 @@ struct GameSettings: Codable, Equatable {
     var hapticsEnabled = true
     var reducedMotion = false
     var highContrast = false
+    var goreEnabled = true
+    var screenShakeEnabled = true
+    var flashesEnabled = true
+    var difficulty: GameDifficulty = .standard
+
+    private enum CodingKeys: String, CodingKey { case musicEnabled, soundEnabled, hapticsEnabled, reducedMotion, highContrast, goreEnabled, screenShakeEnabled, flashesEnabled, difficulty }
+    init() {}
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        musicEnabled = try values.decodeIfPresent(Bool.self, forKey: .musicEnabled) ?? true
+        soundEnabled = try values.decodeIfPresent(Bool.self, forKey: .soundEnabled) ?? true
+        hapticsEnabled = try values.decodeIfPresent(Bool.self, forKey: .hapticsEnabled) ?? true
+        reducedMotion = try values.decodeIfPresent(Bool.self, forKey: .reducedMotion) ?? false
+        highContrast = try values.decodeIfPresent(Bool.self, forKey: .highContrast) ?? false
+        goreEnabled = try values.decodeIfPresent(Bool.self, forKey: .goreEnabled) ?? true
+        screenShakeEnabled = try values.decodeIfPresent(Bool.self, forKey: .screenShakeEnabled) ?? true
+        flashesEnabled = try values.decodeIfPresent(Bool.self, forKey: .flashesEnabled) ?? true
+        difficulty = try values.decodeIfPresent(GameDifficulty.self, forKey: .difficulty) ?? .standard
+    }
 }
 
 struct PlayerProgress: Codable, Equatable {
@@ -155,6 +256,7 @@ struct PlayerProgress: Codable, Equatable {
     var hasSeenTutorial = false
 
     func upgradeLevel(_ kind: UpgradeKind) -> Int { upgradeLevels[kind.rawValue, default: 0] }
+    func upgradeLevel(_ kind: WeaponKind) -> Int { upgradeLevels["weapon.\(kind.rawValue)", default: 0] }
     func isUnlocked(_ weapon: WeaponKind) -> Bool { unlockedWeapons.contains(weapon.rawValue) }
     func isUnlocked(_ trap: TrapKind) -> Bool { unlockedTraps.contains(trap.rawValue) }
 }

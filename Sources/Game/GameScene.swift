@@ -38,8 +38,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private let world = SKNode()
     private var dinerNode: DinerNode?
-    private var selectedZombie: ZombieNode?
-    private var touchSamples: [(point: CGPoint, time: TimeInterval)] = []
+    private var selectedZombies: [ObjectIdentifier: ZombieNode] = [:]
+    private var touchSamples: [ObjectIdentifier: [(point: CGPoint, time: TimeInterval)]] = [:]
     private var lastUpdateTime: TimeInterval = 0
     private var elapsedTime: TimeInterval = 0
     private var timeSinceSpawn: TimeInterval = 0
@@ -61,7 +61,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private let bossHealthFill = SKShapeNode(rectOf: CGSize(width: 260, height: 12), cornerRadius: 6)
     private let bossNameLabel = SKLabelNode(fontNamed: "AvenirNext-Heavy")
 
-    private var startingHealth: Int { GameRules.startingHealth + progress.upgradeLevel(.reinforcedDiner) }
+    private var startingHealth: Int { level.isSandbox ? 99 : (level.modifier == .suddenDeath ? 1 : GameRules.startingHealth + progress.upgradeLevel(.reinforcedDiner)) }
     private var flickMultiplier: CGFloat { 1 + CGFloat(progress.upgradeLevel(.flickTraining)) * 0.10 }
     private var rapidGearLevel: Int { progress.upgradeLevel(.rapidGear) }
     private var groundY: CGFloat { max(70, size.height * 0.13) }
@@ -74,7 +74,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         self.level = level
         self.progress = progress
         self.settings = settings
-        health = GameRules.startingHealth + progress.upgradeLevel(.reinforcedDiner)
+        health = level.isSandbox ? 99 : (level.modifier == .suddenDeath ? 1 : GameRules.startingHealth + progress.upgradeLevel(.reinforcedDiner))
         super.init(size: size)
         scaleMode = .resizeFill
     }
@@ -87,14 +87,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guard !didBuildWorld else { return }
         didBuildWorld = true
         backgroundColor = level.skyColor
-        physicsWorld.gravity = CGVector(dx: 0, dy: -8.8)
+        physicsWorld.gravity = CGVector(dx: 0, dy: level.modifier == .lowGravity ? -3.8 : -8.8)
         physicsWorld.contactDelegate = self
         addChild(world)
         buildEnvironment()
         buildBossHUD()
         notifyDelegate()
         announce(text: level.title.uppercased(), color: .white)
-        spawnZombie(forceWalker: true)
+        if !level.isSandbox { spawnZombie(forceWalker: true) }
     }
 
     override func update(_ currentTime: TimeInterval) {
@@ -109,8 +109,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         timeSinceSpawn += deltaTime
         tickCooldowns(deltaTime)
 
-        let activeDuration = level.isEndless ? .infinity : level.waveDuration * Double(level.totalWaves)
-        if level.isEndless || elapsedTime < activeDuration {
+        let activeDuration = level.isEndless || level.isSandbox ? .infinity : level.waveDuration * Double(level.totalWaves)
+        if level.isSandbox {
+            // Sandbox spawns only through explicit player controls.
+        } else if level.isEndless || elapsedTime < activeDuration {
             let newWave = level.isEndless ? Int(elapsedTime / level.waveDuration) + 1 : min(level.totalWaves, Int(elapsedTime / level.waveDuration) + 1)
             if newWave != wave {
                 wave = newWave
@@ -158,45 +160,53 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard !isGameplayPaused, !gameOver, selectedZombie == nil, let touch = touches.first else { return }
-        let location = touch.location(in: self)
-        if collectPickup(at: location) { return }
-        guard let zombie = zombie(at: location) else { return }
-        selectedZombie = zombie
-        touchSamples = [(location, touch.timestamp)]
-        zombie.beginGrab(reducedMotion: settings.reducedMotion)
-        zombie.zPosition = 100
-        SoundManager.shared.play(.grab)
-        runHaptic(.light)
+        guard !isGameplayPaused, !gameOver else { return }
+        for touch in touches {
+            let key = ObjectIdentifier(touch)
+            let location = touch.location(in: self)
+            if collectPickup(at: location) { continue }
+            guard level.modifier != .noGrab, let zombie = zombie(at: location), !selectedZombies.values.contains(where: { $0 === zombie }), zombie.canBeGrabbed else { continue }
+            selectedZombies[key] = zombie
+            touchSamples[key] = [(location, touch.timestamp)]
+            zombie.beginGrab(reducedMotion: settings.reducedMotion)
+            zombie.zPosition = 100
+            SoundManager.shared.play(.grab)
+            runHaptic(.light)
+        }
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard let zombie = selectedZombie, let touch = touches.first else { return }
-        let location = touch.location(in: self)
-        zombie.position = CGPoint(
-            x: min(size.width - 20, max(20, location.x)),
-            y: min(size.height - 25, max(groundY + zombie.kind.size.height * 0.39 + 4, location.y))
-        )
-        touchSamples.append((location, touch.timestamp))
-        touchSamples = Array(touchSamples.suffix(8))
+        for touch in touches {
+            let key = ObjectIdentifier(touch)
+            guard let zombie = selectedZombies[key] else { continue }
+            let location = touch.location(in: self)
+            zombie.position = CGPoint(x: min(size.width - 20, max(20, location.x)), y: min(size.height - 25, max(groundY + zombie.kind.size.height * 0.39 + 4, location.y)))
+            touchSamples[key, default: []].append((location, touch.timestamp))
+            touchSamples[key] = Array(touchSamples[key, default: []].suffix(8))
+        }
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
-        releaseSelectedZombie(with: touches.first)
+        touches.forEach(releaseZombie)
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
-        releaseSelectedZombie(with: touches.first)
+        touches.forEach(releaseZombie)
     }
 
     func useWeapon(_ kind: WeaponKind) {
-        guard progress.isUnlocked(kind), weaponCooldowns[kind, default: 0] <= 0, !gameOver else { return }
-        weaponCooldowns[kind] = GameRules.cooldown(base: kind.cooldown, rapidGearLevel: rapidGearLevel)
+        guard (level.isSandbox || progress.isUnlocked(kind)), weaponCooldowns[kind, default: 0] <= 0, !gameOver else { return }
+        let weaponLevel = progress.upgradeLevel(kind)
+        weaponCooldowns[kind] = level.isSandbox ? 0 : GameRules.cooldown(base: kind.cooldown, rapidGearLevel: rapidGearLevel + weaponLevel)
         SoundManager.shared.play(.weapon)
         switch kind {
         case .bowlingBall: launchBowlingBall()
         case .shotgun: fireScatterblast()
         case .airstrike: launchAirstrike()
+        case .anvil: dropAnvils()
+        case .grenade: throwExplosive(radius: 150, damage: 4.5, color: .orange)
+        case .propaneTank: launchPropaneTank()
+        case .wreckingBall: swingWreckingBall()
         }
         notifyDelegate()
     }
@@ -291,22 +301,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
 
-    private func releaseSelectedZombie(with touch: UITouch?) {
-        guard let zombie = selectedZombie else { return }
-        if let touch {
-            let location = touch.location(in: self)
-            touchSamples.append((location, touch.timestamp))
-            zombie.position = CGPoint(x: location.x, y: max(groundY + zombie.kind.size.height * 0.39 + 4, location.y))
-        }
-        var velocity = FlickMath.velocity(from: touchSamples)
+    private func releaseZombie(_ touch: UITouch) {
+        let key = ObjectIdentifier(touch)
+        guard let zombie = selectedZombies.removeValue(forKey: key) else { return }
+        let location = touch.location(in: self)
+        touchSamples[key, default: []].append((location, touch.timestamp))
+        zombie.position = CGPoint(x: location.x, y: max(groundY + zombie.kind.size.height * 0.39 + 4, location.y))
+        var velocity = FlickMath.velocity(from: touchSamples.removeValue(forKey: key) ?? [])
         if hypot(velocity.dx, velocity.dy) < 140 { velocity.dy = 180 }
         zombie.release(with: velocity, powerMultiplier: flickMultiplier)
         if hypot(velocity.dx, velocity.dy) > 1_850 {
             hitStop(duration: 0.16, slowFactor: 0.35)
         }
         zombie.zPosition = 20
-        selectedZombie = nil
-        touchSamples.removeAll()
     }
 
     private func zombie(at location: CGPoint) -> ZombieNode? {
@@ -328,6 +335,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private var activeZombies: [ZombieNode] {
         world.children.compactMap { $0 as? ZombieNode }
+    }
+
+    func sandboxSpawn(_ kind: ZombieKind) {
+        guard level.isSandbox else { return }
+        spawnZombie(forceWalker: false, bossKind: kind.isBoss ? kind : nil, forcedKind: kind)
+    }
+
+    func sandboxClear() {
+        guard level.isSandbox else { return }
+        activeZombies.forEach { $0.removeFromParent() }
+        bossHUD.isHidden = true
     }
 
     private func buildBossHUD() {
@@ -373,17 +391,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         return zombie.position.y + halfHeight >= frame.minY && zombie.position.y - halfHeight <= frame.maxY
     }
 
-    private func spawnZombie(forceWalker: Bool, bossKind: ZombieKind? = nil) {
+    private func spawnZombie(forceWalker: Bool, bossKind: ZombieKind? = nil, forcedKind: ZombieKind? = nil) {
         let unlockedCount = min(level.enemyRoster.count, max(1, 1 + wave))
         let roster = Array(level.enemyRoster.prefix(unlockedCount))
-        let kind = bossKind ?? (forceWalker ? (roster.contains(.walker) ? ZombieKind.walker : roster[0]) : roster.randomElement()!)
-        let fromLeft = Bool.random()
+        let kind = forcedKind ?? bossKind ?? (level.modifier == .volatileRush ? .volatile : (level.modifier == .waitressRush ? .waitress : (forceWalker ? (roster.contains(.walker) ? ZombieKind.walker : roster[0]) : roster.randomElement()!)))
+        let fromLeft = level.modifier == .leftOnly ? true : (level.modifier == .rightOnly ? false : Bool.random())
         let difficulty = level.isEndless ? GameRules.survivalDifficulty(wave: wave, baseSpawnInterval: level.baseSpawnInterval) : nil
         let zombie = ZombieNode(
             kind: kind,
             approachesFromLeft: fromLeft,
-            movementMultiplier: difficulty?.speedMultiplier ?? 1,
-            healthMultiplier: difficulty?.healthMultiplier ?? 1
+            movementMultiplier: (difficulty?.speedMultiplier ?? 1) * settings.difficulty.enemySpeed,
+            healthMultiplier: (difficulty?.healthMultiplier ?? 1) * settings.difficulty.enemyHealth
         )
         zombie.position = CGPoint(
             x: fromLeft ? -kind.size.width : size.width + kind.size.width,
@@ -404,7 +422,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func resolveDinerAttack(from zombie: ZombieNode) {
-        health = max(0, health - zombie.kind.dinerDamage)
+        health = level.isSandbox ? health : max(0, health - zombie.kind.dinerDamage)
         combo = 0
         dinerNode?.takeHit(remainingHealth: health, maximumHealth: startingHealth)
         let strikeX = zombie.position.x < size.width / 2 ? houseFrame.minX + 28 : houseFrame.maxX - 28
@@ -428,6 +446,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         specialCharge = min(1, specialCharge + (zombie.kind.isBoss ? 0.5 : (zombie.kind == .brute ? 0.22 : 0.12)))
         let point = zombie.position
         let volatile = zombie.kind == .volatile
+        if settings.goreEnabled, !settings.reducedMotion {
+            spawnPhysicsDebris(from: zombie, reason: reason)
+        }
         zombie.playDefeat(style: defeatStyle(for: reason), reducedMotion: settings.reducedMotion) {}
         if zombie.kind.isBoss { bossHUD.isHidden = true }
         if reason == .thrownOut {
@@ -440,7 +461,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         showScorePopup(at: point, score: killScore)
         showCombo(at: point)
         hitStop(duration: min(0.09, 0.045 + Double(combo) * 0.004))
-        if Int.random(in: 0..<9) == 0 { spawnPickup(at: point) }
+        if Int.random(in: 0..<5) == 0 { spawnPickup(at: point) }
         if volatile, reason != .explosion { explodeVolatile(at: point) }
     }
 
@@ -552,6 +573,95 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
 
+    private func dropAnvils() {
+        for zombie in activeZombies.filter({ !$0.isDefeated }).prefix(3) {
+            let anvil = SKShapeNode(rectOf: CGSize(width: 58, height: 42), cornerRadius: 7)
+            anvil.fillColor = .darkGray
+            anvil.strokeColor = .white.withAlphaComponent(0.55)
+            anvil.position = CGPoint(x: zombie.position.x, y: size.height + 45)
+            anvil.zPosition = 40
+            anvil.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: 58, height: 42))
+            anvil.physicsBody?.mass = 5
+            anvil.physicsBody?.categoryBitMask = PhysicsCategory.weapon
+            anvil.physicsBody?.collisionBitMask = PhysicsCategory.zombie | PhysicsCategory.ground
+            anvil.physicsBody?.contactTestBitMask = PhysicsCategory.zombie
+            world.addChild(anvil)
+            anvil.run(.sequence([.wait(forDuration: 4), .removeFromParent()]))
+        }
+    }
+
+    private func throwExplosive(radius: CGFloat, damage: CGFloat, color: SKColor) {
+        let point = CGPoint(x: size.width / 2, y: groundY + 42)
+        for zombie in activeZombies where !zombie.isDefeated && abs(zombie.position.x - point.x) < radius {
+            if zombie.damage(damage * zombie.kind.weaponDamageMultiplier) { defeat(zombie, reason: .explosion) }
+            else { zombie.launch(with: CGVector(dx: (zombie.position.x < point.x ? -1 : 1) * 260, dy: 300)) }
+        }
+        playCombatVFX(.explosion, at: point, size: radius * 1.7, direction: 1, tint: color)
+        shakeCamera(intensity: 1)
+    }
+
+    private func launchPropaneTank() {
+        let tank = SKShapeNode(rectOf: CGSize(width: 86, height: 38), cornerRadius: 16)
+        tank.fillColor = .red
+        tank.strokeColor = .white
+        tank.name = "weapon"
+        tank.position = CGPoint(x: -50, y: groundY + 34)
+        tank.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: 82, height: 34))
+        tank.physicsBody?.mass = 3
+        tank.physicsBody?.categoryBitMask = PhysicsCategory.weapon
+        tank.physicsBody?.collisionBitMask = PhysicsCategory.zombie | PhysicsCategory.ground
+        tank.physicsBody?.contactTestBitMask = PhysicsCategory.zombie
+        tank.physicsBody?.velocity = CGVector(dx: 680, dy: 110)
+        world.addChild(tank)
+        tank.run(.sequence([.wait(forDuration: 2.2), .run { [weak self, weak tank] in
+            guard let self, let tank else { return }
+            self.throwExplosive(at: tank.position, radius: 175, damage: 5.5)
+            tank.removeFromParent()
+        }]))
+    }
+
+    private func throwExplosive(at point: CGPoint, radius: CGFloat, damage: CGFloat) {
+        for zombie in activeZombies where !zombie.isDefeated && hypot(zombie.position.x - point.x, zombie.position.y - point.y) < radius {
+            if zombie.damage(damage * zombie.kind.weaponDamageMultiplier) { defeat(zombie, reason: .explosion) }
+        }
+        playCombatVFX(.explosion, at: point, size: radius * 1.7, direction: 1)
+    }
+
+    private func swingWreckingBall() {
+        let ball = SKShapeNode(circleOfRadius: 54)
+        ball.fillColor = .darkGray
+        ball.strokeColor = .orange
+        ball.lineWidth = 5
+        ball.name = "weapon"
+        ball.position = CGPoint(x: -70, y: size.height * 0.56)
+        ball.physicsBody = SKPhysicsBody(circleOfRadius: 50)
+        ball.physicsBody?.isDynamic = false
+        ball.physicsBody?.categoryBitMask = PhysicsCategory.weapon
+        ball.physicsBody?.collisionBitMask = PhysicsCategory.none
+        ball.physicsBody?.contactTestBitMask = PhysicsCategory.zombie
+        world.addChild(ball)
+        ball.run(.sequence([.moveTo(x: size.width + 70, duration: 0.78), .moveTo(x: -70, duration: 0.78), .removeFromParent()]))
+    }
+
+    private func spawnPhysicsDebris(from zombie: ZombieNode, reason: DefeatReason) {
+        let impulseScale: CGFloat = reason == .explosion ? 1.8 : (zombie.kind.isBoss ? 0.75 : 1)
+        for (index, debris) in zombie.makePhysicsDebris().enumerated() {
+            debris.position = zombie.position
+            debris.zPosition = 28
+            world.addChild(debris)
+            debris.physicsBody?.applyImpulse(CGVector(dx: CGFloat(index - 2) * 18 * impulseScale, dy: CGFloat(85 + index * 14) * impulseScale))
+            debris.physicsBody?.angularVelocity = CGFloat(index - 3) * 1.7
+            debris.run(.sequence([.wait(forDuration: 2.4), .fadeOut(withDuration: 0.5), .removeFromParent()]))
+        }
+        let decal = SKShapeNode(ellipseOf: CGSize(width: zombie.kind.isBoss ? 120 : 68, height: 18))
+        decal.fillColor = SKColor(red: 0.22, green: 0.42, blue: 0.08, alpha: 0.48)
+        decal.strokeColor = .clear
+        decal.position = CGPoint(x: zombie.position.x, y: groundY + 2)
+        decal.zPosition = 2
+        world.addChild(decal)
+        decal.run(.sequence([.wait(forDuration: 8), .fadeOut(withDuration: 2), .removeFromParent()]))
+    }
+
     private func airstrikeImpact(x: CGFloat) {
         let point = CGPoint(x: x, y: groundY + 35)
         for zombie in activeZombies where !zombie.isDefeated && abs(zombie.position.x - x) < size.width * 0.22 {
@@ -613,23 +723,26 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func finish(won: Bool) {
         guard !gameOver else { return }
         gameOver = true
-        selectedZombie = nil
+        selectedZombies.removeAll()
+        touchSamples.removeAll()
         activeZombies.forEach { $0.physicsBody?.isDynamic = false }
         if won { SoundManager.shared.play(.victory) }
         // Endless never "wins" (there's no wave count to clear), so its payout is scored from
         // performance instead of the win-gated per-level reward, and stars don't apply.
         let earnedStars = level.isEndless ? 0 : GameRules.stars(score: score, health: health, startingHealth: startingHealth, won: won)
-        let reward = level.isEndless ? GameRules.survivalReward(score: score) : (won ? level.reward + earnedStars * 40 : 0)
+        let baseReward = level.isEndless ? GameRules.survivalReward(score: score) : (won ? level.reward + earnedStars * 40 : 0)
+        let reward = level.isSandbox ? 0 : Int(Double(baseReward) * settings.difficulty.rewardMultiplier)
         let result = LevelResult(levelID: level.id, score: score, stars: earnedStars, reward: reward, won: won, defeats: defeats, maxCombo: maxCombo, wave: wave)
         gameDelegate?.gameScene(self, didFinish: result)
     }
 
     private func spawnPickup(at point: CGPoint) {
+        let roll = Int.random(in: 0..<10)
         let choices = WeaponKind.allCases.filter { progress.isUnlocked($0) }
         guard let weapon = choices.randomElement() else { return }
         let pickup = SKShapeNode(circleOfRadius: 25)
-        pickup.name = "pickup-\(weapon.rawValue)"
-        pickup.fillColor = .orange
+        pickup.name = roll < 2 ? "pickup-repair" : (roll < 6 ? "pickup-coin" : "pickup-\(weapon.rawValue)")
+        pickup.fillColor = roll < 2 ? .red : (roll < 6 ? .yellow : .orange)
         pickup.strokeColor = .white
         pickup.lineWidth = 4
         pickup.position = point
@@ -652,6 +765,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                     current.removeFromParent()
                     SoundManager.shared.play(.pickup)
                     announce(text: "\(weapon.title.uppercased()) READY", color: .yellow)
+                    notifyDelegate()
+                    return true
+                } else if current.name == "pickup-coin" {
+                    score += 75
+                    current.removeFromParent()
+                    SoundManager.shared.play(.pickup)
+                    showScorePopup(at: location, score: 75)
+                    return true
+                } else if current.name == "pickup-repair" {
+                    health = min(startingHealth, health + 1)
+                    current.removeFromParent()
+                    SoundManager.shared.play(.pickup)
+                    announce(text: "DINER REPAIRED", color: .green)
                     notifyDelegate()
                     return true
                 }
@@ -793,6 +919,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func radialFlash(at point: CGPoint, color: SKColor) {
+        guard settings.flashesEnabled else { return }
         let ring = SKShapeNode(circleOfRadius: 24)
         ring.fillColor = .clear
         ring.strokeColor = color
@@ -845,7 +972,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func shakeCamera(intensity: CGFloat = 1) {
-        guard !settings.reducedMotion else { return }
+        guard !settings.reducedMotion, settings.screenShakeEnabled else { return }
         world.removeAction(forKey: "shake")
         world.run(.sequence([
             .moveBy(x: -8 * intensity, y: 3 * intensity, duration: 0.035),

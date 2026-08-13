@@ -59,4 +59,12 @@ final class ProgressStoreTests: XCTestCase {
         XCTAssertEqual(store.progress.highScores[GameLevel.endless.id], 3_000)
         XCTAssertEqual(store.progress.highestUnlockedLevel, 1)
     }
+
+    func testWeaponUpgradePersistsWithoutReplacingLegacyUpgrades() {
+        let store = ProgressStore(defaults: defaults)
+        XCTAssertTrue(store.buyWeaponUpgrade(.bowlingBall))
+        XCTAssertEqual(store.progress.upgradeLevel(.bowlingBall), 1)
+        XCTAssertEqual(store.progress.upgradeLevel(.flickTraining), 0)
+        XCTAssertEqual(ProgressStore(defaults: defaults).progress.upgradeLevel(.bowlingBall), 1)
+    }
 }

@@ -2,7 +2,7 @@ import SpriteKit
 import SwiftUI
 
 enum AppScreen: Equatable {
-    case menu, levels, upgrades, settings, credits, game
+    case menu, levels, challenges, sandbox, upgrades, settings, credits, game
 }
 
 @MainActor
@@ -23,6 +23,8 @@ final class AppModel: ObservableObject {
         SoundManager.shared.apply(store.settings)
         SoundManager.shared.startMusic()
     }
+
+    func startSandbox() { start(.sandbox) }
 
     func leaveGame() {
         session = nil
@@ -56,7 +58,7 @@ final class GameSessionModel: ObservableObject, GameSceneDelegate {
         self.progress = progress
         self.completion = completion
         showsTutorial = !progress.hasSeenTutorial
-        health = GameRules.startingHealth + progress.upgradeLevel(.reinforcedDiner)
+        health = level.isSandbox ? 99 : (level.modifier == .suddenDeath ? 1 : GameRules.startingHealth + progress.upgradeLevel(.reinforcedDiner))
         scene = GameScene(level: level, progress: progress, settings: settings, size: CGSize(width: 1194, height: 834))
         scene.gameDelegate = self
         if showsTutorial { scene.isGameplayPaused = true }
@@ -111,6 +113,10 @@ struct GameRootView: View {
                 MainMenuView(model: model)
             case .levels:
                 LevelSelectView(model: model, store: model.store)
+            case .challenges:
+                ChallengeSelectView(model: model)
+            case .sandbox:
+                Color.clear
             case .upgrades:
                 UpgradeShopView(model: model, store: model.store)
             case .settings:
@@ -173,6 +179,8 @@ private struct MainMenuView: View {
                         }
                         MenuButton(title: "LEVELS", icon: "ui_levels", color: .cyan) { model.screen = .levels }
                         MenuButton(title: "SURVIVAL", icon: "ui_survival", color: .red) { model.start(GameLevel.endless) }
+                        MenuButton(title: "CHALLENGES", icon: "ui_star", color: .yellow) { model.screen = .challenges }
+                        MenuButton(title: "SANDBOX", icon: "ui_grave_time", color: .green) { model.startSandbox() }
                         MenuButton(title: "UPGRADES", icon: "ui_upgrades", color: .purple) { model.screen = .upgrades }
                         MenuButton(title: "SETTINGS", icon: "ui_settings", color: .gray) { model.screen = .settings }
                         MenuButton(title: "CREDITS", icon: "ui_info", color: .indigo) { model.screen = .credits }
@@ -327,6 +335,34 @@ private struct LevelSelectView: View {
     }
 }
 
+private struct ChallengeSelectView: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        NightBackground {
+            VStack(spacing: 12) {
+                ScreenHeader(title: "BONUS NIGHTS", subtitle: "Fifteen original rule-bending shifts") { model.screen = .menu }
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 205), spacing: 12)], spacing: 12) {
+                        ForEach(GameLevel.challenges) { level in
+                            Button { model.start(level) } label: {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text(level.title).font(.headline.weight(.black))
+                                    Text(level.modifier.title).font(.caption).foregroundStyle(.cyan)
+                                    Text("4 WAVES • +\(level.reward) COINS").font(.caption2.weight(.black)).foregroundStyle(.white.opacity(0.55))
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading).padding(16)
+                                .background(Color.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 16))
+                                .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.orange.opacity(0.45)))
+                            }.buttonStyle(.plain)
+                        }
+                    }
+                }
+            }.padding(24)
+        }
+    }
+}
+
 private struct UpgradeShopView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var store: ProgressStore
@@ -341,8 +377,10 @@ private struct UpgradeShopView: View {
                             upgradeCard(kind)
                         }
                         ForEach(WeaponKind.allCases) { weapon in
-                            unlockCard(title: weapon.title, detail: "Weapon • \(weapon.unlockCost) coins", icon: weapon.icon, unlocked: store.progress.isUnlocked(weapon)) {
-                                _ = store.unlock(weapon)
+                            let weaponLevel = store.progress.upgradeLevel(weapon)
+                            unlockCard(title: weapon.title, detail: "Weapon • level \(weaponLevel)/3", icon: weapon.icon, unlocked: store.progress.isUnlocked(weapon) && weaponLevel >= 3) {
+                                if store.progress.isUnlocked(weapon) { _ = store.buyWeaponUpgrade(weapon) }
+                                else { _ = store.unlock(weapon) }
                             }
                         }
                         ForEach(TrapKind.allCases) { trap in
@@ -430,6 +468,13 @@ private struct SettingsPanel: View {
                 settingToggle("Haptics", icon: "ui_upgrade_flick", keyPath: \.hapticsEnabled)
                 settingToggle("Reduced Motion", icon: "ui_upgrade_rapid", keyPath: \.reducedMotion)
                 settingToggle("High Contrast", icon: "ui_contrast", keyPath: \.highContrast)
+                settingToggle("Cartoon Gore", icon: "ui_heart", keyPath: \.goreEnabled)
+                settingToggle("Screen Shake", icon: "ui_grave_time", keyPath: \.screenShakeEnabled)
+                settingToggle("Flashes", icon: "ui_moon", keyPath: \.flashesEnabled)
+                Picker("Difficulty", selection: $store.settings.difficulty) {
+                    ForEach(GameDifficulty.allCases) { difficulty in Text(difficulty.title).tag(difficulty) }
+                }
+                .pickerStyle(.segmented).padding(.horizontal, 20)
             }
             .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 22))
             .frame(maxWidth: 560)
@@ -544,9 +589,10 @@ private struct GameContainerView: View {
     }
 
     private var actionBar: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 8) {
+            if session.level.isSandbox { sandboxControls }
             Text("WEAPONS").font(.caption2.weight(.black)).foregroundStyle(.white.opacity(0.55))
-            ForEach(WeaponKind.allCases.filter { session.progress.isUnlocked($0) }) { weapon in
+            ForEach(WeaponKind.allCases.filter { (session.level.isSandbox || session.progress.isUnlocked($0)) && (session.level.modifier != .limitedWeapons || $0 == .bowlingBall) }) { weapon in
                 CooldownButton(title: weapon.title, icon: weapon.icon, remaining: session.weaponCooldowns[weapon, default: 0]) { session.use(weapon) }
             }
             Spacer()
@@ -558,6 +604,18 @@ private struct GameContainerView: View {
         .padding(7)
         .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 18))
         .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.orange.opacity(0.38)))
+    }
+
+    private var sandboxControls: some View {
+        Menu {
+            ForEach(ZombieKind.allCases, id: \.rawValue) { kind in
+                Button(kind.displayName) { session.scene.sandboxSpawn(kind) }
+            }
+            Divider()
+            Button("CLEAR LOT", role: .destructive) { session.scene.sandboxClear() }
+        } label: {
+            Text("SPAWN").font(.caption.weight(.black)).frame(minWidth: 58, minHeight: 36)
+        }.hudButton(active: true)
     }
 
     /// A pop animation + audible ping fires exactly once when `remaining` crosses from cooling
