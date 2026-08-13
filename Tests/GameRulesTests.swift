@@ -39,4 +39,11 @@ final class GameRulesTests: XCTestCase {
         XCTAssertEqual(GameRules.cooldown(base: 10, rapidGearLevel: 2), 8.4, accuracy: 0.001)
         XCTAssertEqual(GameRules.cooldown(base: 10, rapidGearLevel: 99), 6.8, accuracy: 0.001)
     }
+
+    func testEveryZombieHasACompleteSixPartAnimationRig() {
+        for kind in ZombieKind.allCases {
+            let zombie = ZombieNode(kind: kind, approachesFromLeft: true)
+            XCTAssertTrue(zombie.hasCompleteAnimationRig, "Missing articulated animation art for \(kind.rawValue)")
+        }
+    }
 }
