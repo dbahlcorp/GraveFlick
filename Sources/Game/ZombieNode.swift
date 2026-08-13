@@ -93,7 +93,7 @@ private struct PartPose {
     let rotation: CGFloat
 }
 
-private enum RigState {
+enum ZombieAnimationState: CaseIterable, Equatable {
     case walking
     case attacking
     case grabbed
@@ -129,9 +129,9 @@ final class ZombieNode: SKNode {
     private var armorBroken = false
     private var volatileWarningActive = false
     private var freezeOverlay: SKNode?
-    private var state: RigState = .walking
+    private var state: ZombieAnimationState = .walking
 
-    static var hasCompleteStateAnimationSet: Bool { true }
+    var currentAnimationState: ZombieAnimationState { state }
 
     var hasCompleteAnimationRig: Bool {
         sprites.count == RigPart.allCases.count && sprites.values.allSatisfy {

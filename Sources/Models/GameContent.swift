@@ -70,9 +70,9 @@ enum UpgradeKind: String, CaseIterable, Codable, Identifiable {
     }
     var icon: String {
         switch self {
-        case .reinforcedDiner: "shield.fill"
-        case .flickTraining: "hand.tap.fill"
-        case .rapidGear: "timer"
+        case .reinforcedDiner: "ui_upgrade_diner"
+        case .flickTraining: "ui_upgrade_flick"
+        case .rapidGear: "ui_upgrade_rapid"
         }
     }
     func cost(forNextLevel level: Int) -> Int { 250 + level * 300 }
@@ -89,8 +89,10 @@ struct GameLevel: Identifiable, Hashable {
     let enemyRoster: [ZombieKind]
     let skyColor: SKColor
     let horizonColor: SKColor
+    var isEndless = false
 
     var environmentAssetName: String {
+        if isEndless { return "environment_05_last_light" }
         let slug = switch id {
         case 1: "closing_time"
         case 2: "freeway_hunger"
@@ -108,6 +110,22 @@ struct GameLevel: Identifiable, Hashable {
         GameLevel(id: 4, title: "Pressure Cooker", subtitle: "Keep volatile guests apart", totalWaves: 5, waveDuration: 18, baseSpawnInterval: 1.15, reward: 450, enemyRoster: [.runner, .crawler, .armored, .volatile], skyColor: color(23, 9, 22), horizonColor: color(75, 31, 34)),
         GameLevel(id: 5, title: "Last Light", subtitle: "Everything wants breakfast", totalWaves: 6, waveDuration: 19, baseSpawnInterval: 0.98, reward: 650, enemyRoster: ZombieKind.allCases, skyColor: color(4, 8, 22), horizonColor: color(18, 41, 57))
     ]
+
+    /// Not part of `.all` on purpose — it doesn't participate in the level-select carousel,
+    /// star ratings, or unlock progression, only its own tracked high score.
+    static let endless = GameLevel(
+        id: 0,
+        title: "Night Shift Forever",
+        subtitle: "Survive as long as you can",
+        totalWaves: 2_000,
+        waveDuration: 16,
+        baseSpawnInterval: 1.05,
+        reward: 0,
+        enemyRoster: ZombieKind.allCases,
+        skyColor: color(4, 8, 22),
+        horizonColor: color(18, 41, 57),
+        isEndless: true
+    )
 
     private static func color(_ red: CGFloat, _ green: CGFloat, _ blue: CGFloat) -> SKColor {
         SKColor(red: red / 255, green: green / 255, blue: blue / 255, alpha: 1)
@@ -149,4 +167,5 @@ struct LevelResult {
     let won: Bool
     let defeats: Int
     let maxCombo: Int
+    let wave: Int
 }

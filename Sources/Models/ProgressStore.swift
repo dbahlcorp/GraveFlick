@@ -23,8 +23,13 @@ final class ProgressStore: ObservableObject {
         progress.highScores[result.levelID] = max(progress.highScores[result.levelID, default: 0], result.score)
         progress.stars[result.levelID] = max(progress.stars[result.levelID, default: 0], result.stars)
         progress.dailyDefeats += result.defeats
-        if result.won {
+        // Endless mode always ends with won == false but still carries a positive reward
+        // (GameRules.survivalReward), so currency is gated on having a reward at all, not on
+        // winning — level-unlock progression stays win-gated since endless isn't in GameLevel.all.
+        if result.won || result.reward > 0 {
             progress.currency += result.reward
+        }
+        if result.won {
             progress.highestUnlockedLevel = min(GameLevel.all.count, max(progress.highestUnlockedLevel, result.levelID + 1))
         }
         var newAchievements: [String] = []

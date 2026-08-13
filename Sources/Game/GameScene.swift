@@ -408,7 +408,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func launchBowlingBall() {
-        let ball = SKSpriteNode(texture: EquipmentArt.bowlingBall.texture, size: CGSize(width: 58, height: 62))
+        let ball = SKSpriteNode(texture: EquipmentArt.bowlingBall.actionFrames[0], size: CGSize(width: 72, height: 72))
         ball.name = "weapon"
         ball.position = CGPoint(x: -35, y: groundY + 34)
         ball.zPosition = 30
@@ -422,6 +422,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         ball.physicsBody?.velocity = CGVector(dx: 820, dy: 130)
         world.addChild(ball)
         if !settings.reducedMotion {
+            ball.run(.repeatForever(.animate(with: EquipmentArt.bowlingBall.actionFrames, timePerFrame: 0.09, resize: false, restore: true)), withKey: "artFrames")
             ball.run(.repeatForever(.rotate(byAngle: -.pi * 2, duration: 0.38)), withKey: "roll")
         }
         ball.run(.sequence([.wait(forDuration: 5), .removeFromParent()]))
@@ -429,10 +430,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func fireScatterblast() {
         let center = CGPoint(x: size.width / 2, y: groundY + 110)
-        let scattergun = SKSpriteNode(texture: EquipmentArt.scatterblast.texture, size: CGSize(width: 150, height: 150))
+        let scattergun = SKSpriteNode(texture: EquipmentArt.scatterblast.actionFrames[0], size: CGSize(width: 180, height: 180))
         scattergun.position = CGPoint(x: center.x, y: center.y + 16)
         scattergun.zPosition = 135
         world.addChild(scattergun)
+        scattergun.run(.animate(with: EquipmentArt.scatterblast.actionFrames, timePerFrame: settings.reducedMotion ? 0.02 : 0.075, resize: false, restore: false), withKey: "artFrames")
         let recoil = settings.reducedMotion ? CGFloat(4) : CGFloat(18)
         scattergun.run(.sequence([
             .moveBy(x: -recoil, y: -recoil * 0.25, duration: 0.045),
@@ -453,11 +455,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func launchAirstrike() {
-        let beacon = SKSpriteNode(texture: EquipmentArt.airstrikeBeacon.texture, size: CGSize(width: 76, height: 108))
+        let beacon = SKSpriteNode(texture: EquipmentArt.airstrikeBeacon.actionFrames[0], size: CGSize(width: 108, height: 108))
         beacon.position = CGPoint(x: size.width / 2, y: groundY + 54)
         beacon.zPosition = 32
         beacon.setScale(0.05)
         world.addChild(beacon)
+        beacon.run(.repeatForever(.animate(with: EquipmentArt.airstrikeBeacon.actionFrames, timePerFrame: 0.16, resize: false, restore: true)), withKey: "artFrames")
         let pulse = SKAction.sequence([.fadeAlpha(to: 0.38, duration: 0.14), .fadeAlpha(to: 1, duration: 0.14)])
         beacon.run(.sequence([
             .scale(to: 1, duration: settings.reducedMotion ? 0.01 : 0.18),
@@ -486,7 +489,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func placeSpikeStrips() {
         for x in [houseFrame.minX - 115, houseFrame.maxX + 115] {
-            let strip = SKSpriteNode(texture: EquipmentArt.spikeStrip.texture, size: CGSize(width: 125, height: 47))
+            let strip = SKSpriteNode(texture: EquipmentArt.spikeStrip.actionFrames[0], size: CGSize(width: 135, height: 54))
             strip.position = CGPoint(x: x, y: groundY + 10)
             strip.zPosition = 8
             strip.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: 125, height: 30))
@@ -495,6 +498,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             strip.physicsBody?.collisionBitMask = PhysicsCategory.none
             strip.physicsBody?.contactTestBitMask = PhysicsCategory.zombie
             world.addChild(strip)
+            strip.run(.animate(with: EquipmentArt.spikeStrip.actionFrames, timePerFrame: settings.reducedMotion ? 0.02 : 0.09, resize: false, restore: false), withKey: "artFrames")
             if !settings.reducedMotion {
                 strip.setScale(0.15)
                 strip.run(.sequence([.scale(to: 1.12, duration: 0.12), .scale(to: 1, duration: 0.1)]))
@@ -504,10 +508,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func triggerFreezer() {
-        let freezer = SKSpriteNode(texture: EquipmentArt.flashFreezer.texture, size: CGSize(width: 104, height: 116))
+        let freezer = SKSpriteNode(texture: EquipmentArt.flashFreezer.actionFrames[0], size: CGSize(width: 150, height: 116))
         freezer.position = CGPoint(x: size.width / 2, y: groundY + 58)
         freezer.zPosition = 136
         world.addChild(freezer)
+        freezer.run(.animate(with: EquipmentArt.flashFreezer.actionFrames, timePerFrame: settings.reducedMotion ? 0.02 : 0.10, resize: false, restore: false), withKey: "artFrames")
         if !settings.reducedMotion {
             freezer.run(.sequence([
                 .group([.scale(to: 1.12, duration: 0.12), .rotate(byAngle: -0.04, duration: 0.12)]),
@@ -535,8 +540,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         selectedZombie = nil
         activeZombies.forEach { $0.physicsBody?.isDynamic = false }
         if won { SoundManager.shared.play(.victory) }
-        let earnedStars = GameRules.stars(score: score, health: health, startingHealth: startingHealth, won: won)
-        let result = LevelResult(levelID: level.id, score: score, stars: earnedStars, reward: won ? level.reward + earnedStars * 40 : 0, won: won, defeats: defeats, maxCombo: maxCombo)
+        // Endless never "wins" (there's no wave count to clear), so its payout is scored from
+        // performance instead of the win-gated per-level reward, and stars don't apply.
+        let earnedStars = level.isEndless ? 0 : GameRules.stars(score: score, health: health, startingHealth: startingHealth, won: won)
+        let reward = level.isEndless ? GameRules.survivalReward(score: score) : (won ? level.reward + earnedStars * 40 : 0)
+        let result = LevelResult(levelID: level.id, score: score, stars: earnedStars, reward: reward, won: won, defeats: defeats, maxCombo: maxCombo, wave: wave)
         gameDelegate?.gameScene(self, didFinish: result)
     }
 
@@ -595,7 +603,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func buildSky() {
-        world.addChild(EnvironmentNode(levelID: level.id, sceneSize: size, reducedMotion: settings.reducedMotion, highContrast: settings.highContrast))
+        // EnvironmentNode derives its art filename straight from levelID; endless reuses Last
+        // Light's backdrop (there's no dedicated "environment_00" asset for the id-0 placeholder).
+        let environmentID = level.isEndless ? 5 : level.id
+        world.addChild(EnvironmentNode(levelID: environmentID, sceneSize: size, reducedMotion: settings.reducedMotion, highContrast: settings.highContrast))
     }
 
     private func buildGround() {
@@ -644,7 +655,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func playCombatVFX(_ effect: CombatVFX, at point: CGPoint, size: CGFloat, direction: CGFloat, tint: SKColor? = nil) {
-        let sprite = SKSpriteNode(texture: effect.texture, size: CGSize(width: size, height: size))
+        let sprite = SKSpriteNode(texture: effect.frames[0], size: CGSize(width: size, height: size))
         sprite.position = point
         sprite.zPosition = 132
         sprite.xScale = direction < 0 ? -0.22 : 0.22
@@ -655,6 +666,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             sprite.colorBlendFactor = 0.25
         }
         world.addChild(sprite)
+        sprite.run(.animate(with: effect.frames, timePerFrame: settings.reducedMotion ? 0.025 : 0.065, resize: false, restore: false), withKey: "artFrames")
 
         let targetX: CGFloat = direction < 0 ? -1 : 1
         let arrival = SKAction.group([

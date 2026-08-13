@@ -12,10 +12,15 @@ enum CombatVFX: String, CaseIterable {
         return texture
     }
 
-    static var hasCompleteSet: Bool {
-        allCases.allSatisfy {
-            let size = $0.texture.size()
-            return size.width > 1 && size.height > 1
+    var frames: [SKTexture] {
+        (1...4).map { index in
+            let texture = SKTexture(imageNamed: "\(rawValue)_\(index)")
+            texture.filteringMode = .linear
+            return texture
         }
+    }
+
+    static var hasCompleteSet: Bool {
+        allCases.allSatisfy { effect in effect.frames.count == 4 && effect.frames.allSatisfy { $0.size().width > 1 && $0.size().height > 1 } }
     }
 }

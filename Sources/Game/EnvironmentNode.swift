@@ -28,6 +28,7 @@ final class EnvironmentNode: SKNode {
         addChild(plate)
         atmosphere.zPosition = 2
         addChild(atmosphere)
+        addAuthoredAtmosphere(sceneSize: sceneSize)
         buildAtmosphere(sceneSize: sceneSize)
     }
 
@@ -39,6 +40,25 @@ final class EnvironmentNode: SKNode {
         guard let texture = plate.texture else { return false }
         let size = texture.size()
         return size.width > 1 && size.height > 1
+    }
+
+    var hasCompleteAnimatedAtmosphere: Bool {
+        (1...3).allSatisfy { SKTexture(imageNamed: "environment_atmosphere_\(levelID)_\($0)").size().width > 1 }
+    }
+
+    private func addAuthoredAtmosphere(sceneSize: CGSize) {
+        let frames = (1...3).map { index -> SKTexture in
+            let texture = SKTexture(imageNamed: "environment_atmosphere_\(levelID)_\(index)")
+            texture.filteringMode = .linear
+            return texture
+        }
+        let overlay = SKSpriteNode(texture: frames[0], size: CGSize(width: sceneSize.width * 1.08, height: sceneSize.height * 0.46))
+        overlay.position = CGPoint(x: sceneSize.width / 2, y: sceneSize.height * (levelID == 1 ? 0.68 : 0.28))
+        overlay.alpha = levelID == 1 ? 0.42 : 0.34
+        overlay.zPosition = 1
+        atmosphere.addChild(overlay)
+        guard !reducedMotion else { return }
+        overlay.run(.repeatForever(.animate(with: frames, timePerFrame: 0.55, resize: false, restore: true)), withKey: "authoredAtmosphere")
     }
 
     private func buildAtmosphere(sceneSize: CGSize) {

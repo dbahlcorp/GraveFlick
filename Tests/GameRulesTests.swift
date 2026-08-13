@@ -41,12 +41,44 @@ final class GameRulesTests: XCTestCase {
         XCTAssertEqual(GameRules.cooldown(base: 10, rapidGearLevel: 99), 6.8, accuracy: 0.001)
     }
 
+    func testSurvivalRewardScalesWithScoreAndCaps() {
+        XCTAssertEqual(GameRules.survivalReward(score: 0), 80)
+        XCTAssertEqual(GameRules.survivalReward(score: 1_200), 180)
+        XCTAssertEqual(GameRules.survivalReward(score: 100_000), 2_000)
+    }
+
+    func testEndlessLevelIsExcludedFromTheLevelCarousel() {
+        XCTAssertTrue(GameLevel.endless.isEndless)
+        XCTAssertFalse(GameLevel.all.contains { $0.id == GameLevel.endless.id })
+    }
+
     func testEveryZombieHasACompleteSixPartAnimationRig() {
-        XCTAssertTrue(ZombieNode.hasCompleteStateAnimationSet)
         for kind in ZombieKind.allCases {
             let zombie = ZombieNode(kind: kind, approachesFromLeft: true)
             XCTAssertTrue(zombie.hasCompleteAnimationRig, "Missing articulated animation art for \(kind.rawValue)")
         }
+    }
+
+    func testZombieRigTraversesEveryInteractiveAnimationState() {
+        let zombie = ZombieNode(kind: .walker, approachesFromLeft: true)
+        XCTAssertEqual(zombie.currentAnimationState, .walking)
+
+        zombie.beginGrab(reducedMotion: false)
+        XCTAssertEqual(zombie.currentAnimationState, .grabbed)
+        zombie.release(with: CGVector(dx: 300, dy: 240), powerMultiplier: 1)
+        XCTAssertEqual(zombie.currentAnimationState, .airborne)
+        zombie.playImpact(reducedMotion: false)
+        XCTAssertEqual(zombie.currentAnimationState, .impact)
+        zombie.resumeWalking(on: 40)
+        XCTAssertEqual(zombie.currentAnimationState, .recovering)
+
+        let attacker = ZombieNode(kind: .brute, approachesFromLeft: true)
+        XCTAssertTrue(attacker.playDinerAttack(reducedMotion: false) {})
+        XCTAssertEqual(attacker.currentAnimationState, .attacking)
+
+        let defeated = ZombieNode(kind: .volatile, approachesFromLeft: true)
+        defeated.playDefeat(style: .explosion, reducedMotion: false) {}
+        XCTAssertEqual(defeated.currentAnimationState, .defeated)
     }
 
     func testDinerHasCompleteAnimatedAsset() {
@@ -66,15 +98,23 @@ final class GameRulesTests: XCTestCase {
         for level in GameLevel.all {
             let environment = EnvironmentNode(levelID: level.id, sceneSize: CGSize(width: 852, height: 393), reducedMotion: true, highContrast: false)
             XCTAssertTrue(environment.hasCompleteAsset, "Missing environment art for level \(level.id)")
+            XCTAssertTrue(environment.hasCompleteAnimatedAtmosphere, "Missing animated atmosphere for level \(level.id)")
         }
     }
 
     func testCombatVFXHasCompleteAuthoredAssetSet() {
         XCTAssertTrue(CombatVFX.hasCompleteSet)
+        XCTAssertTrue(CombatVFX.allCases.allSatisfy { $0.frames.count == 4 })
     }
 
     func testProductionUIHasCompleteAuthoredAssetSet() {
         XCTAssertTrue(UIArt.hasCompleteSet)
         XCTAssertTrue(GameLevel.all.allSatisfy { UIImage(named: $0.environmentAssetName) != nil })
+        let icons = [
+            "ui_upgrade_diner", "ui_upgrade_flick", "ui_upgrade_rapid", "ui_currency_coin", "ui_achievement", "ui_settings",
+            "ui_pause", "ui_lock", "ui_star", "ui_music", "ui_sound", "ui_contrast", "ui_play", "ui_levels", "ui_survival",
+            "ui_upgrades", "ui_info", "ui_back", "ui_grave_time", "ui_heart", "ui_moon", "ui_tutorial_grab", "ui_tutorial_flick", "ui_tutorial_slam"
+        ]
+        XCTAssertTrue(icons.allSatisfy { UIImage(named: $0) != nil })
     }
 }

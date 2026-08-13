@@ -13,6 +13,14 @@ enum EquipmentArt: String, CaseIterable {
         return texture
     }
 
+    var actionFrames: [SKTexture] {
+        (1...3).map { index in
+            let texture = SKTexture(imageNamed: "\(rawValue)_\(index)")
+            texture.filteringMode = .linear
+            return texture
+        }
+    }
+
     func fittedSize(inside bounds: CGSize) -> CGSize {
         let source = texture.size()
         guard source.width > 0, source.height > 0 else { return bounds }
@@ -21,10 +29,7 @@ enum EquipmentArt: String, CaseIterable {
     }
 
     static var hasCompleteSet: Bool {
-        allCases.allSatisfy {
-            let size = $0.texture.size()
-            return size.width > 1 && size.height > 1
-        }
+        allCases.allSatisfy { art in art.actionFrames.count == 3 && art.actionFrames.allSatisfy { $0.size().width > 1 && $0.size().height > 1 } }
     }
 }
 

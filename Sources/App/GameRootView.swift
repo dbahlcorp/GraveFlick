@@ -168,15 +168,16 @@ private struct MainMenuView: View {
                             .tracking(1.8)
                             .foregroundStyle(.white.opacity(0.72))
                             .multilineTextAlignment(.center)
-                        MenuButton(title: "PLAY", icon: "play.fill", color: .orange) {
+                        MenuButton(title: "PLAY", icon: "ui_play", color: .orange) {
                             model.start(GameLevel.all[max(0, store.progress.highestUnlockedLevel - 1)])
                         }
-                        MenuButton(title: "LEVELS", icon: "map.fill", color: .cyan) { model.screen = .levels }
-                        MenuButton(title: "UPGRADES", icon: "wrench.and.screwdriver.fill", color: .purple) { model.screen = .upgrades }
-                        MenuButton(title: "SETTINGS", icon: "gearshape.fill", color: .gray) { model.screen = .settings }
-                        MenuButton(title: "CREDITS", icon: "info.circle.fill", color: .indigo) { model.screen = .credits }
+                        MenuButton(title: "LEVELS", icon: "ui_levels", color: .cyan) { model.screen = .levels }
+                        MenuButton(title: "SURVIVAL", icon: "ui_survival", color: .red) { model.start(GameLevel.endless) }
+                        MenuButton(title: "UPGRADES", icon: "ui_upgrades", color: .purple) { model.screen = .upgrades }
+                        MenuButton(title: "SETTINGS", icon: "ui_settings", color: .gray) { model.screen = .settings }
+                        MenuButton(title: "CREDITS", icon: "ui_info", color: .indigo) { model.screen = .credits }
                         HStack(spacing: 8) {
-                            Image(systemName: "bolt.circle.fill").foregroundStyle(.yellow)
+                            Image("ui_currency_coin").resizable().scaledToFit().frame(width: 20, height: 20)
                             Text("\(store.progress.currency) NIGHT COINS")
                         }
                         .font(.caption.weight(.black))
@@ -184,6 +185,11 @@ private struct MainMenuView: View {
                         Text(store.dailySummary)
                             .font(.caption2.weight(.black))
                             .foregroundStyle(store.progress.dailyClaimed ? .green : .cyan)
+                        if let bestSurvival = store.progress.highScores[GameLevel.endless.id] {
+                            Text("BEST SURVIVAL SCORE \(bestSurvival)")
+                                .font(.caption2.weight(.black))
+                                .foregroundStyle(.red.opacity(0.85))
+                        }
                     }
                     .frame(maxWidth: 390)
                     .roadsidePanel(padding: 10)
@@ -237,7 +243,7 @@ private struct CreditsView: View {
                         ForEach(achievements, id: \.0) { item in
                             let unlocked = store.progress.achievements.contains(item.0)
                             HStack {
-                                RoadsideIcon(systemName: unlocked ? "trophy.fill" : "lock.fill", color: unlocked ? .yellow : .gray)
+                                RoadsideIcon(imageName: unlocked ? "ui_achievement" : "ui_lock", color: unlocked ? .yellow : .gray)
                                 VStack(alignment: .leading) {
                                     Text(item.1).font(.subheadline.weight(.black))
                                     Text(item.2).font(.caption2).foregroundStyle(.white.opacity(0.55))
@@ -290,7 +296,7 @@ private struct LevelSelectView: View {
                                     HStack {
                                         Text(level.title).font(.headline.weight(.black))
                                         Spacer()
-                                        Image(systemName: unlocked ? "moon.stars.fill" : "lock.fill")
+                                        Image(unlocked ? "ui_star" : "ui_lock").resizable().scaledToFit().frame(width: 24, height: 24)
                                     }
                                     Text(level.subtitle).font(.caption).foregroundStyle(.white.opacity(0.6))
                                     Spacer()
@@ -374,7 +380,7 @@ private struct UpgradeShopView: View {
     private func cardContent(title: String, detail: String, footer: String, icon: String) -> some View {
         HStack(spacing: 15) {
             Group {
-                if icon.hasPrefix("weapon_") || icon.hasPrefix("trap_") {
+                if icon.hasPrefix("weapon_") || icon.hasPrefix("trap_") || icon.hasPrefix("ui_") {
                     RoadsideIcon(imageName: icon, color: .orange)
                 } else {
                     RoadsideIcon(systemName: icon, color: .orange)
@@ -419,11 +425,11 @@ private struct SettingsPanel: View {
     var body: some View {
         VStack(spacing: 16) {
             VStack(spacing: 0) {
-                settingToggle("Music", icon: "music.note", keyPath: \.musicEnabled)
-                settingToggle("Sound Effects", icon: "speaker.wave.2.fill", keyPath: \.soundEnabled)
-                settingToggle("Haptics", icon: "waveform.path", keyPath: \.hapticsEnabled)
-                settingToggle("Reduced Motion", icon: "figure.walk.motion", keyPath: \.reducedMotion)
-                settingToggle("High Contrast", icon: "circle.lefthalf.filled", keyPath: \.highContrast)
+                settingToggle("Music", icon: "ui_music", keyPath: \.musicEnabled)
+                settingToggle("Sound Effects", icon: "ui_sound", keyPath: \.soundEnabled)
+                settingToggle("Haptics", icon: "ui_upgrade_flick", keyPath: \.hapticsEnabled)
+                settingToggle("Reduced Motion", icon: "ui_upgrade_rapid", keyPath: \.reducedMotion)
+                settingToggle("High Contrast", icon: "ui_contrast", keyPath: \.highContrast)
             }
             .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 22))
             .frame(maxWidth: 560)
@@ -451,7 +457,10 @@ private struct SettingsPanel: View {
                 SoundManager.shared.apply(store.settings)
             }
         )) {
-            Label(title, systemImage: icon).font(.headline)
+            HStack(spacing: 12) {
+                Image(icon).resizable().scaledToFit().frame(width: 30, height: 30)
+                Text(title).font(.headline)
+            }
         }
         .tint(.orange)
         .foregroundStyle(.white)
@@ -513,15 +522,15 @@ private struct GameContainerView: View {
 
     private var gameplayHUD: some View {
         HStack(spacing: 10) {
-            Button { session.togglePause() } label: { Image(systemName: "pause.fill") }
+            Button { session.togglePause() } label: { Image("ui_pause").resizable().scaledToFit().frame(width: 25, height: 25) }
                 .hudButton()
-            stat("SCORE", "\(session.score)", icon: "star.fill", color: .yellow)
-            stat("WAVE", "\(session.wave)/\(session.level.totalWaves)", icon: "moon.stars.fill", color: .cyan)
-            stat("DINER", String(repeating: "♥", count: session.health), icon: "heart.fill", color: .red)
+            stat("SCORE", "\(session.score)", icon: "ui_star", color: .yellow)
+            stat("WAVE", session.level.isEndless ? "\(session.wave)" : "\(session.wave)/\(session.level.totalWaves)", icon: "ui_achievement", color: .cyan)
+            stat("DINER", String(repeating: "♥", count: session.health), icon: "ui_upgrade_diner", color: .red)
             Spacer()
             Button { session.useSpecial() } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: "hourglass.bottomhalf.filled")
+                    Image("ui_grave_time").resizable().scaledToFit().frame(width: 24, height: 24)
                     Text(session.specialCharge >= 1 ? "GRAVE TIME" : "\(Int(session.specialCharge * 100))%")
                 }
             }
@@ -603,7 +612,7 @@ private struct GameContainerView: View {
 
     private func stat(_ label: String, _ value: String, icon: String, color: Color) -> some View {
         HStack(spacing: 7) {
-            Image(systemName: icon).foregroundStyle(color)
+            Image(icon).resizable().scaledToFit().frame(width: 22, height: 22)
             VStack(alignment: .leading, spacing: 0) {
                 Text(label).font(.system(size: 8, weight: .black)).foregroundStyle(.white.opacity(0.55))
                 Text(value).font(.system(size: 15, weight: .black, design: .rounded)).foregroundStyle(.white)
@@ -619,9 +628,9 @@ private struct GameContainerView: View {
             Image("ui_graveflick_logo").resizable().scaledToFit().frame(width: 260, height: 108)
             Text("YOUR FIRST NIGHT").font(.title.weight(.black))
             HStack(spacing: 24) {
-                tutorialStep("1", "GRAB", "Touch and hold any creature", icon: "hand.tap.fill", motion: .scale)
-                tutorialStep("2", "FLICK", "Drag quickly and release", icon: "hand.draw.fill", motion: .horizontal)
-                tutorialStep("3", "SLAM", "Use height and pavement impact", icon: "arrow.down.to.line.compact", motion: .vertical)
+                tutorialStep("1", "GRAB", "Touch and hold any creature", icon: "ui_tutorial_grab", motion: .scale)
+                tutorialStep("2", "FLICK", "Drag quickly and release", icon: "ui_tutorial_flick", motion: .horizontal)
+                tutorialStep("3", "SLAM", "Use height and pavement impact", icon: "ui_tutorial_slam", motion: .vertical)
             }
             Text("Weapons and traps recharge automatically. Defeats charge Grave Time.")
                 .font(.caption).foregroundStyle(.white.opacity(0.65))
@@ -640,7 +649,7 @@ private struct GameContainerView: View {
         VStack(spacing: 6) {
             ZStack {
                 Circle().fill(Color.orange.opacity(0.20)).frame(width: 48, height: 48)
-                Image(systemName: icon).font(.title2.weight(.bold)).foregroundStyle(.orange)
+                Image(icon).resizable().scaledToFit().frame(width: 40, height: 40)
             }
             .scaleEffect(motion == .scale && tutorialGesture ? 1.18 : 1)
             .offset(x: motion == .horizontal && tutorialGesture ? 15 : 0,
@@ -676,9 +685,14 @@ private struct GameContainerView: View {
         ModalCard(animated: !store.settings.reducedMotion) {
             Image(result.won ? "diner_complete" : "diner_destroyed")
                 .resizable().scaledToFit().frame(width: 280, height: 145)
-            Text(result.won ? "LOT CLEARED" : "DINER OVERRUN").font(.title.weight(.black))
-            Text(String(repeating: "★", count: result.stars) + String(repeating: "☆", count: 3 - result.stars))
-                .font(.largeTitle).foregroundStyle(.yellow)
+            Text(result.won ? "LOT CLEARED" : (session.level.isEndless ? "NIGHT SHIFT ENDED" : "DINER OVERRUN")).font(.title.weight(.black))
+            if session.level.isEndless {
+                Text("REACHED WAVE \(result.wave)")
+                    .font(.title2.weight(.black)).foregroundStyle(.cyan)
+            } else {
+                Text(String(repeating: "★", count: result.stars) + String(repeating: "☆", count: 3 - result.stars))
+                    .font(.largeTitle).foregroundStyle(.yellow)
+            }
             Text("SCORE \(result.score)  •  +\(result.reward) COINS")
                 .font(.headline.weight(.black)).foregroundStyle(.white.opacity(0.72))
             HStack {
@@ -718,7 +732,7 @@ private struct ScreenHeader: View {
     let back: () -> Void
     var body: some View {
         HStack {
-            Button(action: back) { Image(systemName: "chevron.left").font(.title2.weight(.black)) }.hudButton()
+            Button(action: back) { Image("ui_back").resizable().scaledToFit().frame(width: 27, height: 27) }.hudButton()
             VStack(alignment: .leading) {
                 Text(title).font(.largeTitle.weight(.black))
                 Text(subtitle).foregroundStyle(.white.opacity(0.58))
@@ -737,7 +751,7 @@ private struct MenuButton: View {
     var body: some View {
         Button(action: action) {
             HStack {
-                Image(systemName: icon).frame(width: 30)
+                Image(icon).resizable().scaledToFit().frame(width: 30, height: 30)
                 Text(title).font(.headline.weight(.black)).tracking(1.5)
                 Spacer()
                 Image(systemName: "chevron.right")

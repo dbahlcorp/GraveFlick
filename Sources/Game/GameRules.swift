@@ -19,6 +19,13 @@ enum GameRules {
     static func cooldown(base: TimeInterval, rapidGearLevel: Int) -> TimeInterval {
         base * max(0.68, 1 - Double(rapidGearLevel) * 0.08)
     }
+
+    /// Endless mode always ends in a loss (there's no wave count to "clear"), so its coin payout
+    /// is scored from performance instead of the win-gated per-level reward. Capped so a very
+    /// long single run can't inflate the economy faster than clearing several story levels.
+    static func survivalReward(score: Int) -> Int {
+        min(2_000, 80 + score / 12)
+    }
 }
 
 enum FlickMath {
