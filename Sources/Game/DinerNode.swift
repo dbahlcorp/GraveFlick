@@ -2,6 +2,9 @@ import SpriteKit
 
 final class DinerNode: SKNode {
     private let building = SKSpriteNode(imageNamed: "diner_complete")
+    private let damagedBuilding = SKSpriteNode(imageNamed: "diner_damaged")
+    private let severeBuilding = SKSpriteNode(imageNamed: "diner_severe")
+    private let destroyedBuilding = SKSpriteNode(imageNamed: "diner_destroyed")
     private let title = SKLabelNode(fontNamed: "AvenirNext-Heavy")
     private let neonGlow = SKShapeNode(rectOf: CGSize(width: 1, height: 1), cornerRadius: 16)
     private let leftWindowGlow = SKShapeNode(rectOf: CGSize(width: 1, height: 1), cornerRadius: 8)
@@ -21,11 +24,20 @@ final class DinerNode: SKNode {
         building.texture?.filteringMode = .linear
         building.size = Self.aspectFit(building.texture?.size() ?? .zero, inside: frame.size)
         building.zPosition = 2
-        if highContrast {
-            building.color = .white
-            building.colorBlendFactor = 0.12
-        }
         addChild(building)
+        for (sprite, zPosition) in [(damagedBuilding, CGFloat(2.05)), (severeBuilding, CGFloat(2.1)), (destroyedBuilding, CGFloat(2.2))] {
+            sprite.texture?.filteringMode = .linear
+            sprite.size = building.size
+            sprite.zPosition = zPosition
+            sprite.alpha = 0
+            addChild(sprite)
+        }
+        if highContrast {
+            [building, damagedBuilding, severeBuilding, destroyedBuilding].forEach {
+                $0.color = .white
+                $0.colorBlendFactor = 0.12
+            }
+        }
         position = CGPoint(x: frame.midX, y: frame.minY + building.size.height / 2)
 
         let width = building.size.width
@@ -75,18 +87,22 @@ final class DinerNode: SKNode {
     }
 
     var hasCompleteAssetSet: Bool {
-        guard let texture = building.texture else { return false }
-        return texture.size().width > 1 && texture.size().height > 1
+        [building, damagedBuilding, severeBuilding, destroyedBuilding].allSatisfy {
+            guard let texture = $0.texture else { return false }
+            return texture.size().width > 1 && texture.size().height > 1
+        }
     }
 
     func takeHit(remainingHealth: Int, maximumHealth: Int) {
         let ratio = CGFloat(max(0, remainingHealth)) / CGFloat(max(1, maximumHealth))
         damageStage = max(damageStage, ratio <= 0 ? 3 : (ratio <= 0.34 ? 2 : (ratio <= 0.67 ? 1 : 0)))
 
-        building.run(.sequence([
-            .colorize(with: .red, colorBlendFactor: 0.82, duration: 0.06),
-            .colorize(withColorBlendFactor: damageStage >= 2 ? 0.18 : 0, duration: 0.22)
-        ]), withKey: "damageFlash")
+        [building, damagedBuilding, severeBuilding, destroyedBuilding].forEach {
+            $0.run(.sequence([
+                .colorize(with: .red, colorBlendFactor: 0.82, duration: 0.06),
+                .colorize(withColorBlendFactor: damageStage >= 2 ? 0.12 : 0, duration: 0.22)
+            ]), withKey: "damageFlash")
+        }
 
         neonGlow.run(.sequence([
             .fadeAlpha(to: 0.08, duration: 0.035),
@@ -164,28 +180,81 @@ final class DinerNode: SKNode {
     private func applyDamageAppearance() {
         switch damageStage {
         case 1:
+            transition(to: damagedBuilding, hiding: building)
             rightWindowGlow.alpha = 0.58
             neonGlow.zRotation = -0.014
         case 2:
+            transition(to: severeBuilding, hiding: damagedBuilding)
+            building.alpha = 0
             rightWindowGlow.alpha = 0.12
             leftWindowGlow.alpha = 0.34
             neonGlow.alpha = 0.42
             neonGlow.zRotation = -0.038
             title.alpha = 0.58
-            emitSteam(dark: true)
+            startDamageSmoke()
         case 3:
+            transition(to: destroyedBuilding, hiding: severeBuilding)
+            building.alpha = 0
+            damagedBuilding.alpha = 0
             rightWindowGlow.alpha = 0
             leftWindowGlow.alpha = 0.08
             neonGlow.alpha = 0.10
             title.alpha = 0.08
-            building.run(.group([
-                .scaleX(to: 1.04, duration: 0.13),
-                .scaleY(to: 0.92, duration: 0.13),
-                .moveBy(x: 0, y: -7, duration: 0.13)
+            destroyedBuilding.run(.sequence([
+                .group([.scaleX(to: 1.045, duration: 0.10), .scaleY(to: 0.91, duration: 0.10), .moveBy(x: 0, y: -7, duration: 0.10)]),
+                .group([.scaleX(to: 1, duration: 0.16), .scaleY(to: 1, duration: 0.16), .moveBy(x: 0, y: 2, duration: 0.16)])
             ]), withKey: "collapse")
-            for _ in 0..<3 { emitSteam(dark: true) }
+            emitDebris()
+            startEmbers()
         default:
             break
+        }
+    }
+
+    private func transition(to revealed: SKSpriteNode, hiding hidden: SKSpriteNode) {
+        revealed.removeAction(forKey: "reveal")
+        hidden.removeAction(forKey: "hide")
+        revealed.run(.fadeIn(withDuration: reducedMotion ? 0.01 : 0.22), withKey: "reveal")
+        hidden.run(.fadeOut(withDuration: reducedMotion ? 0.01 : 0.22), withKey: "hide")
+    }
+
+    private func startDamageSmoke() {
+        guard !reducedMotion, action(forKey: "damageSmoke") == nil else { return }
+        run(.repeatForever(.sequence([
+            .run { [weak self] in self?.emitSteam(dark: true) },
+            .wait(forDuration: 0.52)
+        ])), withKey: "damageSmoke")
+    }
+
+    private func startEmbers() {
+        guard !reducedMotion, action(forKey: "embers") == nil else { return }
+        run(.repeatForever(.sequence([
+            .run { [weak self] in self?.emitEmber() },
+            .wait(forDuration: 0.22)
+        ])), withKey: "embers")
+    }
+
+    private func emitEmber() {
+        let ember = SKShapeNode(circleOfRadius: CGFloat.random(in: 1.4...2.8))
+        ember.fillColor = Bool.random() ? .orange : .yellow
+        ember.strokeColor = .clear
+        ember.position = CGPoint(x: CGFloat.random(in: -building.size.width * 0.32...building.size.width * 0.32),
+                                 y: CGFloat.random(in: -building.size.height * 0.17...building.size.height * 0.05))
+        ember.zPosition = 7
+        addChild(ember)
+        ember.run(.sequence([.group([.moveBy(x: CGFloat.random(in: -16...16), y: CGFloat.random(in: 28...58), duration: 0.65), .fadeOut(withDuration: 0.65)]), .removeFromParent()]))
+    }
+
+    private func emitDebris() {
+        guard !reducedMotion else { return }
+        for index in 0..<10 {
+            let debris = SKShapeNode(rectOf: CGSize(width: CGFloat.random(in: 4...10), height: CGFloat.random(in: 3...7)), cornerRadius: 1)
+            debris.fillColor = index.isMultiple(of: 3) ? SKColor(red: 0.22, green: 0.40, blue: 0.39, alpha: 1) : .darkGray
+            debris.strokeColor = .black
+            debris.position = CGPoint(x: CGFloat.random(in: -building.size.width * 0.38...building.size.width * 0.38), y: building.size.height * 0.18)
+            debris.zPosition = 8
+            addChild(debris)
+            debris.run(.sequence([.group([.moveBy(x: CGFloat.random(in: -38...38), y: CGFloat.random(in: -48 ... -24), duration: 0.42), .rotate(byAngle: CGFloat.random(in: -2.4...2.4), duration: 0.42), .fadeOut(withDuration: 0.46)]), .removeFromParent()]))
         }
     }
 
