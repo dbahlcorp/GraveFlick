@@ -19,15 +19,40 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install XcodeGen
         run: brew install xcodegen
+      - name: Verify generated animation assets
+        run: |
+          python3 -m pip install --disable-pip-version-check -r Scripts/requirements.txt
+          python3 Scripts/prepare_animation_atlases.py --root . --verify
       - name: Generate Xcode project
         run: xcodegen generate
+      - name: Select available iPhone simulator
+        id: simulator
+        shell: bash
+        run: |
+          find_iphone() {
+            xcrun simctl list devices available -j | python3 -c 'import json,sys; devices=json.load(sys.stdin)["devices"]; candidates=[device for runtime in devices.values() for device in runtime if device["name"].startswith("iPhone")]; print(candidates[0]["udid"] if candidates else "")'
+          }
+          DEVICE_ID=$(find_iphone)
+          if [ -z "$DEVICE_ID" ]; then
+            echo "No iPhone simulator is installed; downloading the iOS simulator platform."
+            xcodebuild -downloadPlatform iOS
+            RUNTIME_ID=$(xcrun simctl list runtimes available -j | python3 -c 'import json,sys; runtimes=[runtime for runtime in json.load(sys.stdin)["runtimes"] if runtime["identifier"].startswith("com.apple.CoreSimulator.SimRuntime.iOS")]; print(runtimes[-1]["identifier"] if runtimes else "")')
+            DEVICE_TYPE=$(xcrun simctl list devicetypes -j | python3 -c 'import json,sys; types=[device for device in json.load(sys.stdin)["devicetypes"] if device["name"].startswith("iPhone")]; print(types[0]["identifier"] if types else "")')
+            if [ -z "$RUNTIME_ID" ] || [ -z "$DEVICE_TYPE" ]; then
+              echo "::error::Unable to locate an iOS runtime or iPhone device type after platform download"
+              exit 1
+            fi
+            DEVICE_ID=$(xcrun simctl create "GraveFlick CI iPhone" "$DEVICE_TYPE" "$RUNTIME_ID")
+          fi
+          echo "id=$DEVICE_ID" >> "$GITHUB_OUTPUT"
+          echo "Using iPhone simulator $DEVICE_ID"
       - name: Build and run tests
         run: >-
           xcodebuild test
           -project GraveFlick.xcodeproj
           -scheme GraveFlick
           -configuration Debug
-          -destination 'platform=iOS Simulator,name=iPhone 16 Pro,OS=latest'
+          -destination 'platform=iOS Simulator,id=${{ steps.simulator.outputs.id }}'
           CODE_SIGNING_ALLOWED=NO
 
   testflight:

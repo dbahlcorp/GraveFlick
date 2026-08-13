@@ -59,6 +59,26 @@ final class GameRulesTests: XCTestCase {
         }
     }
 
+    func testSurvivalDifficultyKeepsScalingAndAddsBossPressure() {
+        let waveOne = GameRules.survivalDifficulty(wave: 1)
+        let waveTen = GameRules.survivalDifficulty(wave: 10)
+        let waveFifty = GameRules.survivalDifficulty(wave: 50)
+
+        XCTAssertGreaterThan(waveOne.spawnInterval, waveTen.spawnInterval)
+        XCTAssertGreaterThan(waveTen.spawnInterval, waveFifty.spawnInterval)
+        XCTAssertGreaterThan(waveTen.speedMultiplier, waveOne.speedMultiplier)
+        XCTAssertGreaterThan(waveFifty.healthMultiplier, waveTen.healthMultiplier)
+        XCTAssertGreaterThan(waveFifty.spawnCount, waveOne.spawnCount)
+        XCTAssertTrue(waveTen.isBossWave)
+        XCTAssertFalse(GameRules.survivalDifficulty(wave: 11).isBossWave)
+    }
+
+    func testReducedMotionUsesOneReadableAnimationFrame() {
+        XCTAssertEqual(GameRules.animationFrameIndices(totalFrames: 4, reducedMotion: true, emphasizedFrame: 2), [2])
+        XCTAssertEqual(GameRules.animationFrameIndices(totalFrames: 4, reducedMotion: false, emphasizedFrame: 2), [0, 1, 2, 3])
+        XCTAssertEqual(GameRules.animationFrameIndices(totalFrames: 0, reducedMotion: true, emphasizedFrame: 2), [])
+    }
+
     func testZombieRigTraversesEveryInteractiveAnimationState() {
         let zombie = ZombieNode(kind: .walker, approachesFromLeft: true)
         XCTAssertEqual(zombie.currentAnimationState, .walking)
@@ -88,6 +108,19 @@ final class GameRulesTests: XCTestCase {
             highContrast: false
         )
         XCTAssertTrue(diner.hasCompleteAssetSet)
+    }
+
+    func testDinerDamageStagesStopIdleComponentLoops() {
+        let diner = DinerNode(frame: CGRect(x: 0, y: 0, width: 260, height: 250), reducedMotion: false, highContrast: false)
+        XCTAssertTrue(diner.componentAnimationIsRunning)
+        diner.takeHit(remainingHealth: 3, maximumHealth: 5)
+        XCTAssertEqual(diner.currentDamageStage, 1)
+        XCTAssertFalse(diner.componentAnimationIsRunning)
+        diner.takeHit(remainingHealth: 1, maximumHealth: 5)
+        XCTAssertEqual(diner.currentDamageStage, 2)
+        diner.takeHit(remainingHealth: 0, maximumHealth: 5)
+        XCTAssertEqual(diner.currentDamageStage, 3)
+        XCTAssertFalse(diner.componentAnimationIsRunning)
     }
 
     func testEquipmentHasCompleteIllustratedAssetSet() {

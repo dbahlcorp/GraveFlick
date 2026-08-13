@@ -116,6 +116,8 @@ final class ZombieNode: SKNode {
     var hasResolvedImpact = false
     var highestPoint: CGFloat = 0
     private(set) var health: CGFloat
+    private let maximumHealth: CGFloat
+    private let movementMultiplier: CGFloat
 
     private let rig = SKNode()
     private let shadowNode: SKShapeNode
@@ -140,10 +142,12 @@ final class ZombieNode: SKNode {
         }
     }
 
-    init(kind: ZombieKind, approachesFromLeft: Bool) {
+    init(kind: ZombieKind, approachesFromLeft: Bool, movementMultiplier: CGFloat = 1, healthMultiplier: CGFloat = 1) {
         self.kind = kind
         self.approachesFromLeft = approachesFromLeft
-        health = kind.hitPoints
+        self.movementMultiplier = movementMultiplier
+        maximumHealth = kind.hitPoints * healthMultiplier
+        health = maximumHealth
 
         shadowNode = SKShapeNode(ellipseOf: CGSize(width: kind.size.width * 0.72, height: 16))
         shadowNode.fillColor = .black.withAlphaComponent(0.34)
@@ -309,7 +313,7 @@ final class ZombieNode: SKNode {
 
         let direction: CGFloat = approachesFromLeft ? 1 : -1
         let slowMultiplier: CGFloat = slowTime > 0 ? 0.42 : 1
-        position.x += direction * kind.speed * slowMultiplier * CGFloat(deltaTime)
+        position.x += direction * kind.speed * movementMultiplier * slowMultiplier * CGFloat(deltaTime)
         guard !reducedMotion else { return }
 
         let cadence: CGFloat = kind == .runner ? 12.5 : (kind == .crawler ? 10.5 : (kind == .brute ? 6.2 : 8.2))
@@ -546,7 +550,7 @@ final class ZombieNode: SKNode {
         guard !isDefeated else { return true }
         health -= amount
         healthBar.isHidden = false
-        healthBar.xScale = max(0.05, health / kind.hitPoints)
+        healthBar.xScale = max(0.05, health / maximumHealth)
         hitReactionTime = 0.16
         for sprite in sprites.values {
             sprite.run(.sequence([
@@ -561,11 +565,11 @@ final class ZombieNode: SKNode {
                 .moveBy(x: -direction * 7, y: -2, duration: 0.10)
             ]), withKey: "hit")
         }
-        if kind == .armored, !armorBroken, health <= kind.hitPoints * 0.48 {
+        if kind == .armored, !armorBroken, health <= maximumHealth * 0.48 {
             armorBroken = true
             playArmorBreak()
         }
-        if kind == .volatile, !volatileWarningActive, health <= kind.hitPoints * 0.55 {
+        if kind == .volatile, !volatileWarningActive, health <= maximumHealth * 0.55 {
             volatileWarningActive = true
             playVolatileWarning()
         }

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import filecmp
 from pathlib import Path
+import tempfile
 
 from PIL import Image
 
@@ -91,13 +93,7 @@ def crop_boxes(source: Path, destination: Path, selections: list[tuple[tuple[int
         canvas.save(destination / f"{name}.png", optimize=True)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--root", type=Path, required=True)
-    args = parser.parse_args()
-    root = args.root
-    source = root / "ArtSource" / "AnimationAtlases"
-
+def prepare(root: Path, source: Path) -> None:
     crop_cells(source / "ui-icons.png", root / "Resources" / "Art" / "UI" / "Icons", 4, 3, [
         "ui_upgrade_diner", "ui_upgrade_flick", "ui_upgrade_rapid",
         "ui_currency_coin", "ui_achievement", "ui_settings",
@@ -123,6 +119,37 @@ def main() -> None:
     crop_cells(source / "environment-atmosphere.png", root / "Resources" / "Art" / "Environments" / "Frames", 5, 3, [
         f"environment_atmosphere_{level}_{frame}" for level in range(1, 6) for frame in range(1, 4)
     ], False)
+
+
+def verify(root: Path) -> None:
+    relative_directories = [
+        Path("Resources/Art/UI/Icons"), Path("Resources/Art/VFX/Frames"), Path("Resources/Art/Equipment/Frames"),
+        Path("Resources/Art/Diner/Frames"), Path("Resources/Art/Environments/Frames"),
+    ]
+    with tempfile.TemporaryDirectory(prefix="graveflick-assets-") as temporary:
+        generated_root = Path(temporary)
+        prepare(generated_root, root / "ArtSource" / "AnimationAtlases")
+        failures: list[str] = []
+        for relative in relative_directories:
+            committed = root / relative
+            generated = generated_root / relative
+            comparison = filecmp.dircmp(committed, generated)
+            failures.extend(str(relative / name) for name in comparison.left_only + comparison.right_only + comparison.diff_files + comparison.funny_files)
+        if failures:
+            raise SystemExit("Generated animation assets are stale or missing:\n" + "\n".join(sorted(failures)))
+    print("Animation asset verification passed.")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--verify", action="store_true", help="Regenerate into a temporary directory and compare with committed frames")
+    args = parser.parse_args()
+    root = args.root.resolve()
+    if args.verify:
+        verify(root)
+    else:
+        prepare(root, root / "ArtSource" / "AnimationAtlases")
 
 
 if __name__ == "__main__":

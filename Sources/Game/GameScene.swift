@@ -104,17 +104,21 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         timeSinceSpawn += deltaTime
         tickCooldowns(deltaTime)
 
-        let activeDuration = level.waveDuration * Double(level.totalWaves)
-        if elapsedTime < activeDuration {
-            let newWave = min(level.totalWaves, Int(elapsedTime / level.waveDuration) + 1)
+        let activeDuration = level.isEndless ? .infinity : level.waveDuration * Double(level.totalWaves)
+        if level.isEndless || elapsedTime < activeDuration {
+            let newWave = level.isEndless ? Int(elapsedTime / level.waveDuration) + 1 : min(level.totalWaves, Int(elapsedTime / level.waveDuration) + 1)
             if newWave != wave {
                 wave = newWave
-                announce(text: "WAVE \(wave)", color: .white)
+                announce(text: GameRules.survivalDifficulty(wave: wave).isBossWave && level.isEndless ? "BOSS WAVE \(wave)" : "WAVE \(wave)", color: .white)
             }
-            let interval = max(0.48, level.baseSpawnInterval - Double(wave - 1) * 0.09)
+            let difficulty = level.isEndless ? GameRules.survivalDifficulty(wave: wave, baseSpawnInterval: level.baseSpawnInterval) : nil
+            let interval = difficulty?.spawnInterval ?? max(0.48, level.baseSpawnInterval - Double(wave - 1) * 0.09)
             if timeSinceSpawn >= interval {
                 timeSinceSpawn = 0
-                spawnZombie(forceWalker: false)
+                let spawnCount = difficulty?.spawnCount ?? 1
+                for index in 0..<spawnCount {
+                    spawnZombie(forceWalker: false, forceBoss: difficulty?.isBossWave == true && index == 0)
+                }
             }
         } else if !spawningFinished {
             spawningFinished = true
@@ -319,12 +323,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         return zombie.position.y + halfHeight >= frame.minY && zombie.position.y - halfHeight <= frame.maxY
     }
 
-    private func spawnZombie(forceWalker: Bool) {
+    private func spawnZombie(forceWalker: Bool, forceBoss: Bool = false) {
         let unlockedCount = min(level.enemyRoster.count, max(1, 1 + wave))
         let roster = Array(level.enemyRoster.prefix(unlockedCount))
-        let kind = forceWalker ? (roster.contains(.walker) ? ZombieKind.walker : roster[0]) : roster.randomElement()!
+        let kind = forceBoss ? (wave.isMultiple(of: 10) ? .brute : .armored) : (forceWalker ? (roster.contains(.walker) ? ZombieKind.walker : roster[0]) : roster.randomElement()!)
         let fromLeft = Bool.random()
-        let zombie = ZombieNode(kind: kind, approachesFromLeft: fromLeft)
+        let difficulty = level.isEndless ? GameRules.survivalDifficulty(wave: wave, baseSpawnInterval: level.baseSpawnInterval) : nil
+        let bossMultiplier: CGFloat = forceBoss ? 1.6 : 1
+        let zombie = ZombieNode(
+            kind: kind,
+            approachesFromLeft: fromLeft,
+            movementMultiplier: difficulty?.speedMultiplier ?? 1,
+            healthMultiplier: (difficulty?.healthMultiplier ?? 1) * bossMultiplier
+        )
         zombie.position = CGPoint(
             x: fromLeft ? -kind.size.width : size.width + kind.size.width,
             y: groundY + kind.size.height * 0.39 + 2
@@ -434,14 +445,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         scattergun.position = CGPoint(x: center.x, y: center.y + 16)
         scattergun.zPosition = 135
         world.addChild(scattergun)
-        scattergun.run(.animate(with: EquipmentArt.scatterblast.actionFrames, timePerFrame: settings.reducedMotion ? 0.02 : 0.075, resize: false, restore: false), withKey: "artFrames")
-        let recoil = settings.reducedMotion ? CGFloat(4) : CGFloat(18)
-        scattergun.run(.sequence([
-            .moveBy(x: -recoil, y: -recoil * 0.25, duration: 0.045),
-            .moveBy(x: recoil, y: recoil * 0.25, duration: 0.11),
-            .fadeOut(withDuration: 0.12),
-            .removeFromParent()
-        ]))
+        if settings.reducedMotion { scattergun.texture = EquipmentArt.scatterblast.actionFrames[1] }
+        else { scattergun.run(.animate(with: EquipmentArt.scatterblast.actionFrames, timePerFrame: 0.075, resize: false, restore: false), withKey: "artFrames") }
+        if settings.reducedMotion {
+            scattergun.run(.sequence([.wait(forDuration: 0.12), .fadeOut(withDuration: 0.10), .removeFromParent()]))
+        } else {
+            let recoil: CGFloat = 18
+            scattergun.run(.sequence([
+                .moveBy(x: -recoil, y: -recoil * 0.25, duration: 0.045),
+                .moveBy(x: recoil, y: recoil * 0.25, duration: 0.11),
+                .fadeOut(withDuration: 0.12),
+                .removeFromParent()
+            ]))
+        }
         let zombies = activeZombies.filter { !$0.isDefeated }
         for zombie in zombies {
             let dx = zombie.position.x - center.x
@@ -460,15 +476,21 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         beacon.zPosition = 32
         beacon.setScale(0.05)
         world.addChild(beacon)
-        beacon.run(.repeatForever(.animate(with: EquipmentArt.airstrikeBeacon.actionFrames, timePerFrame: 0.16, resize: false, restore: true)), withKey: "artFrames")
-        let pulse = SKAction.sequence([.fadeAlpha(to: 0.38, duration: 0.14), .fadeAlpha(to: 1, duration: 0.14)])
-        beacon.run(.sequence([
-            .scale(to: 1, duration: settings.reducedMotion ? 0.01 : 0.18),
-            .repeat(pulse, count: 4),
-            .wait(forDuration: 0.45),
-            .fadeOut(withDuration: 0.2),
-            .removeFromParent()
-        ]))
+        if settings.reducedMotion { beacon.texture = EquipmentArt.airstrikeBeacon.actionFrames[1] }
+        else { beacon.run(.repeatForever(.animate(with: EquipmentArt.airstrikeBeacon.actionFrames, timePerFrame: 0.16, resize: false, restore: true)), withKey: "artFrames") }
+        if settings.reducedMotion {
+            beacon.setScale(1)
+            beacon.run(.sequence([.wait(forDuration: 1.2), .fadeOut(withDuration: 0.12), .removeFromParent()]))
+        } else {
+            let pulse = SKAction.sequence([.fadeAlpha(to: 0.38, duration: 0.14), .fadeAlpha(to: 1, duration: 0.14)])
+            beacon.run(.sequence([
+                .scale(to: 1, duration: 0.18),
+                .repeat(pulse, count: 4),
+                .wait(forDuration: 0.45),
+                .fadeOut(withDuration: 0.2),
+                .removeFromParent()
+            ]))
+        }
         let xs = [size.width * 0.18, size.width * 0.5, size.width * 0.82]
         for (index, x) in xs.enumerated() {
             world.run(.sequence([
@@ -498,7 +520,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             strip.physicsBody?.collisionBitMask = PhysicsCategory.none
             strip.physicsBody?.contactTestBitMask = PhysicsCategory.zombie
             world.addChild(strip)
-            strip.run(.animate(with: EquipmentArt.spikeStrip.actionFrames, timePerFrame: settings.reducedMotion ? 0.02 : 0.09, resize: false, restore: false), withKey: "artFrames")
+            if settings.reducedMotion { strip.texture = EquipmentArt.spikeStrip.actionFrames[2] }
+            else { strip.run(.animate(with: EquipmentArt.spikeStrip.actionFrames, timePerFrame: 0.09, resize: false, restore: false), withKey: "artFrames") }
             if !settings.reducedMotion {
                 strip.setScale(0.15)
                 strip.run(.sequence([.scale(to: 1.12, duration: 0.12), .scale(to: 1, duration: 0.1)]))
@@ -512,7 +535,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         freezer.position = CGPoint(x: size.width / 2, y: groundY + 58)
         freezer.zPosition = 136
         world.addChild(freezer)
-        freezer.run(.animate(with: EquipmentArt.flashFreezer.actionFrames, timePerFrame: settings.reducedMotion ? 0.02 : 0.10, resize: false, restore: false), withKey: "artFrames")
+        if settings.reducedMotion { freezer.texture = EquipmentArt.flashFreezer.actionFrames[2] }
+        else { freezer.run(.animate(with: EquipmentArt.flashFreezer.actionFrames, timePerFrame: 0.10, resize: false, restore: false), withKey: "artFrames") }
         if !settings.reducedMotion {
             freezer.run(.sequence([
                 .group([.scale(to: 1.12, duration: 0.12), .rotate(byAngle: -0.04, duration: 0.12)]),
@@ -655,30 +679,35 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func playCombatVFX(_ effect: CombatVFX, at point: CGPoint, size: CGFloat, direction: CGFloat, tint: SKColor? = nil) {
-        let sprite = SKSpriteNode(texture: effect.frames[0], size: CGSize(width: size, height: size))
+        let frameIndices = GameRules.animationFrameIndices(totalFrames: effect.frames.count, reducedMotion: settings.reducedMotion, emphasizedFrame: 2)
+        let presentationFrames = frameIndices.map { effect.frames[$0] }
+        let sprite = SKSpriteNode(texture: presentationFrames[0], size: CGSize(width: size, height: size))
         sprite.position = point
         sprite.zPosition = 132
-        sprite.xScale = direction < 0 ? -0.22 : 0.22
-        sprite.yScale = 0.22
-        sprite.alpha = 0
+        sprite.xScale = direction < 0 ? (settings.reducedMotion ? -1 : -0.22) : (settings.reducedMotion ? 1 : 0.22)
+        sprite.yScale = settings.reducedMotion ? 1 : 0.22
+        sprite.alpha = settings.reducedMotion ? 1 : 0
         if let tint {
             sprite.color = tint
             sprite.colorBlendFactor = 0.25
         }
         world.addChild(sprite)
-        sprite.run(.animate(with: effect.frames, timePerFrame: settings.reducedMotion ? 0.025 : 0.065, resize: false, restore: false), withKey: "artFrames")
+        if !settings.reducedMotion {
+            sprite.run(.animate(with: presentationFrames, timePerFrame: 0.065, resize: false, restore: false), withKey: "artFrames")
+        }
 
-        let targetX: CGFloat = direction < 0 ? -1 : 1
-        let arrival = SKAction.group([
-            .scaleX(to: targetX * (settings.reducedMotion ? 1 : 1.12), duration: settings.reducedMotion ? 0.03 : 0.07),
-            .scaleY(to: settings.reducedMotion ? 1 : 1.12, duration: settings.reducedMotion ? 0.03 : 0.07),
-            .fadeIn(withDuration: 0.03)
-        ])
-        let settle = SKAction.group([
-            .scaleX(to: targetX, duration: 0.10),
-            .scaleY(to: 1, duration: 0.10)
-        ])
-        sprite.run(.sequence([arrival, settle, .wait(forDuration: settings.reducedMotion ? 0.06 : 0.13), .group([.scale(to: 1.18, duration: 0.18), .fadeOut(withDuration: 0.18)]), .removeFromParent()]))
+        if settings.reducedMotion {
+            sprite.run(.sequence([.wait(forDuration: 0.12), .fadeOut(withDuration: 0.12), .removeFromParent()]))
+        } else {
+            let targetX: CGFloat = direction < 0 ? -1 : 1
+            let arrival = SKAction.group([
+                .scaleX(to: targetX * 1.12, duration: 0.07),
+                .scaleY(to: 1.12, duration: 0.07),
+                .fadeIn(withDuration: 0.03)
+            ])
+            let settle = SKAction.group([.scaleX(to: targetX, duration: 0.10), .scaleY(to: 1, duration: 0.10)])
+            sprite.run(.sequence([arrival, settle, .wait(forDuration: 0.13), .group([.scale(to: 1.18, duration: 0.18), .fadeOut(withDuration: 0.18)]), .removeFromParent()]))
+        }
 
         let debrisColor: SKColor = switch effect {
         case .pavementImpact: .darkGray
@@ -686,7 +715,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case .explosion: .orange
         case .freezerBurst: .cyan
         }
-        playDirectionalDebris(at: point, color: debrisColor, direction: direction, count: effect == .explosion ? 14 : 8)
+        if !settings.reducedMotion {
+            playDirectionalDebris(at: point, color: debrisColor, direction: direction, count: effect == .explosion ? 14 : 8)
+        }
     }
 
     private func playDirectionalDebris(at point: CGPoint, color: SKColor, direction: CGFloat, count: Int) {

@@ -26,6 +26,32 @@ enum GameRules {
     static func survivalReward(score: Int) -> Int {
         min(2_000, 80 + score / 12)
     }
+
+    struct SurvivalDifficulty: Equatable {
+        let spawnInterval: TimeInterval
+        let speedMultiplier: CGFloat
+        let healthMultiplier: CGFloat
+        let spawnCount: Int
+        let isBossWave: Bool
+    }
+
+    static func survivalDifficulty(wave: Int, baseSpawnInterval: TimeInterval = 1.05) -> SurvivalDifficulty {
+        let safeWave = max(1, wave)
+        let tier = (safeWave - 1) / 5
+        return SurvivalDifficulty(
+            spawnInterval: max(0.34, baseSpawnInterval - Double(safeWave - 1) * 0.035),
+            speedMultiplier: min(2.25, 1 + CGFloat(safeWave - 1) * 0.028),
+            healthMultiplier: min(3.5, 1 + CGFloat(tier) * 0.18),
+            spawnCount: min(3, 1 + tier / 3),
+            isBossWave: safeWave.isMultiple(of: 5)
+        )
+    }
+
+    static func animationFrameIndices(totalFrames: Int, reducedMotion: Bool, emphasizedFrame: Int) -> [Int] {
+        guard totalFrames > 0 else { return [] }
+        if reducedMotion { return [min(max(0, emphasizedFrame), totalFrames - 1)] }
+        return Array(0..<totalFrames)
+    }
 }
 
 enum FlickMath {

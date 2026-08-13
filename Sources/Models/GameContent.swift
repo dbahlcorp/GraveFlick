@@ -117,7 +117,7 @@ struct GameLevel: Identifiable, Hashable {
         id: 0,
         title: "Night Shift Forever",
         subtitle: "Survive as long as you can",
-        totalWaves: 2_000,
+        totalWaves: .max,
         waveDuration: 16,
         baseSpawnInterval: 1.05,
         reward: 0,

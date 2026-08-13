@@ -16,6 +16,10 @@ final class DinerNode: SKNode {
     private let ventArt = SKSpriteNode(imageNamed: "diner_vent_1")
     private let reducedMotion: Bool
     private var damageStage = 0
+    var currentDamageStage: Int { damageStage }
+    var componentAnimationIsRunning: Bool {
+        marqueeArt.action(forKey: "marqueeFrames") != nil || doorArt.action(forKey: "doorFrames") != nil || ventArt.action(forKey: "ventFrames") != nil
+    }
 
     init(frame: CGRect, reducedMotion: Bool, highContrast: Bool) {
         self.reducedMotion = reducedMotion
@@ -215,6 +219,7 @@ final class DinerNode: SKNode {
             transition(to: damagedBuilding, hiding: building)
             rightWindowGlow.alpha = 0.58
             neonGlow.zRotation = -0.014
+            setComponentDamageFrame(2)
         case 2:
             transition(to: severeBuilding, hiding: damagedBuilding)
             building.alpha = 0
@@ -224,6 +229,7 @@ final class DinerNode: SKNode {
             neonGlow.zRotation = -0.038
             title.alpha = 0.58
             startDamageSmoke()
+            setComponentDamageFrame(3)
         case 3:
             transition(to: destroyedBuilding, hiding: severeBuilding)
             building.alpha = 0
@@ -240,12 +246,7 @@ final class DinerNode: SKNode {
             startEmbers()
             // Stop the idle frame loops first — they run forever and would otherwise overwrite
             // this destroyed-stage texture on their very next tick.
-            marqueeArt.removeAction(forKey: "marqueeFrames")
-            doorArt.removeAction(forKey: "doorFrames")
-            ventArt.removeAction(forKey: "ventFrames")
-            marqueeArt.texture = SKTexture(imageNamed: "diner_marquee_4")
-            doorArt.texture = SKTexture(imageNamed: "diner_door_4")
-            ventArt.texture = SKTexture(imageNamed: "diner_vent_4")
+            setComponentDamageFrame(4)
         default:
             break
         }
@@ -256,6 +257,15 @@ final class DinerNode: SKNode {
         hidden.removeAction(forKey: "hide")
         revealed.run(.fadeIn(withDuration: reducedMotion ? 0.01 : 0.22), withKey: "reveal")
         hidden.run(.fadeOut(withDuration: reducedMotion ? 0.01 : 0.22), withKey: "hide")
+    }
+
+    private func setComponentDamageFrame(_ frame: Int) {
+        marqueeArt.removeAction(forKey: "marqueeFrames")
+        doorArt.removeAction(forKey: "doorFrames")
+        ventArt.removeAction(forKey: "ventFrames")
+        marqueeArt.texture = SKTexture(imageNamed: "diner_marquee_\(frame)")
+        doorArt.texture = SKTexture(imageNamed: "diner_door_\(frame)")
+        ventArt.texture = SKTexture(imageNamed: "diner_vent_\(frame)")
     }
 
     private func startDamageSmoke() {
