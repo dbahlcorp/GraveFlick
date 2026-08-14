@@ -1,4 +1,5 @@
 import CoreGraphics
+import SpriteKit
 import UIKit
 import XCTest
 @testable import GraveFlick
@@ -142,6 +143,7 @@ final class GameRulesTests: XCTestCase {
         XCTAssertFalse(boss.canBeGrabbed)
         _ = boss.damage(ZombieKind.butcher.hitPoints * 0.13)
         XCTAssertTrue(boss.canBeGrabbed)
+        boss.updateWalking(deltaTime: 0.2, reducedMotion: true)
         _ = boss.damage(ZombieKind.butcher.hitPoints * 0.6)
         XCTAssertGreaterThanOrEqual(boss.bossPhase, 2)
     }
@@ -163,7 +165,9 @@ final class GameRulesTests: XCTestCase {
     }
 
     func testDamagedZombieCanLoseALimbAndKeepFighting() {
+        let world = SKNode()
         let brute = ZombieNode(kind: .brute, approachesFromLeft: true)
+        world.addChild(brute)
         XCTAssertFalse(brute.damage(100))
         XCTAssertGreaterThanOrEqual(brute.severedLimbCount, 1)
         XCTAssertFalse(brute.isDefeated)
