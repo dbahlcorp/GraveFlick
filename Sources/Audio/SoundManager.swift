@@ -64,11 +64,13 @@ final class SoundManager {
         }
         try? AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
         try? AVAudioSession.sharedInstance().setActive(true)
+        engine.prepare()
         try? engine.start()
     }
 
     func apply(_ settings: GameSettings) {
         self.settings = settings
+        if settings.soundEnabled { _ = ensureEffectsEngine() }
         applyMixVolumes()
         if settings.musicEnabled { playDesiredMusic() } else { stopMusic() }
         if !settings.soundEnabled {
@@ -89,6 +91,7 @@ final class SoundManager {
     func startGameplayMusic(environmentID: Int) {
         desiredMusicTrack = .gameplay
         self.environmentID = environmentID
+        _ = ensureEffectsEngine()
         playDesiredMusic()
         startEnvironmentalLayers()
     }
@@ -96,7 +99,7 @@ final class SoundManager {
     func setApplicationActive(_ active: Bool) {
         if active {
             try? AVAudioSession.sharedInstance().setActive(true)
-            if !engine.isRunning { try? engine.start() }
+            _ = ensureEffectsEngine()
             playDesiredMusic()
             if desiredMusicTrack == .gameplay, settings.soundEnabled, !ambienceNode.isPlaying { startEnvironmentalLayers() }
         } else {
@@ -185,7 +188,7 @@ final class SoundManager {
     }
 
     private func startEnvironmentalLayers() {
-        guard settings.soundEnabled, desiredMusicTrack == .gameplay else { return }
+        guard settings.soundEnabled, desiredMusicTrack == .gameplay, ensureEffectsEngine() else { return }
         ambienceNode.stop()
         tensionNode.stop()
         if let ambience = environmentalAmbience(for: environmentID) {
@@ -254,7 +257,7 @@ final class SoundManager {
     }
 
     private func playLayered(_ spec: LayeredSpec, pan: Float = 0) {
-        guard settings.soundEnabled,
+        guard settings.soundEnabled, ensureEffectsEngine(),
               let node = effectNodes.first(where: { !$0.isPlaying }),
               let buffer = layeredEffect(spec) else { return }
         node.pan = max(-0.9, min(0.9, pan))
@@ -312,7 +315,7 @@ final class SoundManager {
     /// this throttle bounds how many can stack up in one frame when several zombies spawn/attack
     /// at once — without it, a busy moment could pile up multiple multi-millisecond calls.
     func playZombieVoice(for kind: ZombieKind, moment: ZombieVoiceMoment, pan: Float = 0) {
-        guard settings.soundEnabled else { return }
+        guard settings.soundEnabled, ensureEffectsEngine() else { return }
         let now = Date().timeIntervalSinceReferenceDate
         guard now - lastZombieVoiceTime >= 0.05 else { return }
         guard let node = effectNodes.first(where: { !$0.isPlaying }),
@@ -325,7 +328,7 @@ final class SoundManager {
     }
 
     func playBossLayer(phase: Int) {
-        guard settings.musicEnabled else { return }
+        guard settings.musicEnabled, ensureEffectsEngine() else { return }
         let notes = phase >= 3 ? [82.41, 55, 98] : [65.41, 73.42, 55]
         guard let node = effectNodes.first(where: { !$0.isPlaying }), let buffer = fanfare(notes: notes, noteDuration: 0.16, volume: 0.11) else { return }
         node.pan = 0
@@ -336,7 +339,7 @@ final class SoundManager {
     /// - Parameter comboScale: raises the pitch a semitone-ish step per combo hit, the classic
     ///   escalating-reward cue for chained defeats. Ignored by effects that aren't combo-driven.
     func play(_ effect: Effect, comboScale: Int = 1) {
-        guard settings.soundEnabled else { return }
+        guard settings.soundEnabled, ensureEffectsEngine() else { return }
         guard let node = effectNodes.first(where: { !$0.isPlaying }) else { return }
 
         let buffer: AVAudioPCMBuffer?
@@ -374,6 +377,31 @@ final class SoundManager {
         node.volume = Float(settings.soundVolume)
         node.scheduleBuffer(buffer)
         node.play()
+    }
+
+    /// AVAudioPlayer continues to play the music masters even when AVAudioEngine failed to start,
+    /// which can make a run appear to have ambience but no zombie or weapon effects. Recover the
+    /// effects graph at the point of use instead of relying on the one launch-time start attempt.
+    @discardableResult
+    private func ensureEffectsEngine() -> Bool {
+        guard settings.soundEnabled else { return false }
+        if engine.isRunning { return true }
+
+        do {
+            try AVAudioSession.sharedInstance().setActive(true)
+            engine.prepare()
+            try engine.start()
+            return true
+        } catch {
+            engine.reset()
+            engine.prepare()
+            do {
+                try engine.start()
+                return true
+            } catch {
+                return false
+            }
+        }
     }
 
     /// .pickup, .victory, and .heartbeat are synthesized separately in `play` and never reach here;

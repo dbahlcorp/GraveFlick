@@ -40,7 +40,8 @@ final class AppModel: ObservableObject {
 }
 
 @MainActor
-final class GameSessionModel: ObservableObject, GameSceneDelegate {
+final class GameSessionModel: ObservableObject, GameSceneDelegate, Identifiable {
+    let id = UUID()
     @Published private(set) var score = 0
     @Published private(set) var wave = 1
     @Published private(set) var waveStatus = "WAVE 1"
@@ -134,6 +135,7 @@ struct GameRootView: View {
             case .game:
                 if let session = model.session {
                     GameContainerView(model: model, session: session, store: model.store)
+                        .id(session.id)
                 }
             }
         }
@@ -604,6 +606,7 @@ private struct GameContainerView: View {
     var body: some View {
         ZStack {
             SpriteView(scene: session.scene, options: [.ignoresSiblingOrder])
+                .id(session.id)
                 .ignoresSafeArea()
 
             // <= 2, not == 1: a Brute/Volatile deals 2 diner damage in one hit (ZombieKind.dinerDamage),
@@ -613,11 +616,17 @@ private struct GameContainerView: View {
             VStack(spacing: 0) {
                 gameplayHUD
                 Text(session.waveStatus)
-                    .font(.caption.weight(.black))
+                    .font(.system(size: 10, weight: .black, design: .rounded))
+                    .tracking(1.2)
                     .foregroundStyle(session.waveStatusHighlighted ? Color.yellow : Color.white.opacity(0.82))
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 5)
-                    .background(.black.opacity(0.62), in: Capsule())
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 6)
+                    .background(
+                        LinearGradient(colors: [Color.orange.opacity(session.waveStatusHighlighted ? 0.40 : 0.16), .black.opacity(0.88)], startPoint: .top, endPoint: .bottom),
+                        in: UnevenRoundedRectangle(topLeadingRadius: 4, bottomLeadingRadius: 12, bottomTrailingRadius: 12, topTrailingRadius: 4)
+                    )
+                    .overlay(UnevenRoundedRectangle(topLeadingRadius: 4, bottomLeadingRadius: 12, bottomTrailingRadius: 12, topTrailingRadius: 4).stroke(Color.orange.opacity(0.62)))
+                    .shadow(color: Color.orange.opacity(session.waveStatusHighlighted ? 0.32 : 0.10), radius: 6)
                     .padding(.top, 5)
                     .accessibilityLabel("Wave status, \(session.waveStatus)")
                 Spacer()
@@ -654,31 +663,62 @@ private struct GameContainerView: View {
 
     private var gameplayHUD: some View {
         HStack(spacing: 10) {
-            Button { session.togglePause() } label: { Image("ui_pause").resizable().scaledToFit().frame(width: 25, height: 25) }
-                .hudButton()
+            Button { session.togglePause() } label: {
+                BundledArtImage(name: "ui_pause", subdirectory: "Art/UI/Icons")
+                    .scaledToFit()
+                    .padding(8)
+                    .frame(width: 42, height: 42)
+                    .background(LinearGradient(colors: [Color.orange.opacity(0.72), Color(red: 0.15, green: 0.07, blue: 0.035)], startPoint: .top, endPoint: .bottom), in: RoundedRectangle(cornerRadius: 11))
+                    .overlay(RoundedRectangle(cornerRadius: 11).stroke(Color.orange.opacity(0.92), lineWidth: 1.4))
+                    .overlay(alignment: .topLeading) { MenuRivet(color: .orange).padding(4) }
+                    .overlay(alignment: .bottomTrailing) { MenuRivet(color: .orange).padding(4) }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Pause night")
             stat("SCORE", "\(session.score)", icon: "ui_star", color: .yellow)
             stat("WAVE", session.level.isEndless ? "\(session.wave)" : "\(session.wave)/\(session.level.totalWaves)", icon: "ui_moon", color: .cyan)
             stat("DINER", String(repeating: "♥", count: session.health), icon: "ui_heart", color: .red)
             Spacer()
             Button { session.useSpecial() } label: {
-                HStack(spacing: 8) {
-                    Image("ui_grave_time").resizable().scaledToFit().frame(width: 24, height: 24)
-                    Text(session.specialCharge >= 1 ? "GRAVE TIME" : "\(Int(session.specialCharge * 100))%")
+                HStack(spacing: 7) {
+                    BundledArtImage(name: "ui_grave_time", subdirectory: "Art/UI/Icons").scaledToFit().frame(width: 24, height: 24)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("GRAVE TIME").font(.system(size: 7, weight: .black)).foregroundStyle(.white.opacity(0.52))
+                        Text(session.specialCharge >= 1 ? "READY" : "\(Int(session.specialCharge * 100))%")
+                            .font(.system(size: 12, weight: .black, design: .rounded))
+                    }
+                }
+                .padding(.horizontal, 11)
+                .frame(height: 42)
+                .background(LinearGradient(colors: [Color.cyan.opacity(session.specialCharge >= 1 ? 0.48 : 0.14), .black.opacity(0.88)], startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 11))
+                .overlay(RoundedRectangle(cornerRadius: 11).stroke(Color.cyan.opacity(session.specialCharge >= 1 ? 0.90 : 0.34)))
+                .overlay(alignment: .bottomLeading) {
+                    Capsule()
+                        .fill(session.specialCharge >= 1 ? Color.yellow : Color.cyan)
+                        .frame(width: max(5, 105 * CGFloat(session.specialCharge)), height: 3)
+                        .padding(.horizontal, 4)
+                        .offset(y: -2)
                 }
             }
-            .hudButton(active: session.specialCharge >= 1)
+            .buttonStyle(.plain)
             .disabled(session.specialCharge < 1)
+            .opacity(session.specialCharge >= 1 ? 1 : 0.78)
             .accessibilityLabel("Grave Time special ability, \(Int(session.specialCharge * 100)) percent charged")
         }
         .padding(7)
-        .background(.black.opacity(0.48), in: RoundedRectangle(cornerRadius: 18))
-        .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color(red: 0.28, green: 0.63, blue: 0.62).opacity(0.55)))
+        .background(
+            LinearGradient(colors: [Color(red: 0.11, green: 0.12, blue: 0.13).opacity(0.92), Color(red: 0.018, green: 0.025, blue: 0.035).opacity(0.95)], startPoint: .top, endPoint: .bottom),
+            in: RoundedRectangle(cornerRadius: 17)
+        )
+        .overlay(RoundedRectangle(cornerRadius: 17).stroke(Color(red: 0.34, green: 0.70, blue: 0.66).opacity(0.62), lineWidth: 1.3))
+        .overlay(RoundedRectangle(cornerRadius: 13).stroke(.white.opacity(0.07)).padding(4))
+        .shadow(color: .black.opacity(0.50), radius: 8, y: 4)
     }
 
     private var actionBar: some View {
         HStack(spacing: 5) {
             if session.level.isSandbox { sandboxControls }
-            Text("WEAPONS").font(.system(size: 9, weight: .black)).foregroundStyle(.white.opacity(0.55))
+            sectionSign("WEAPONS", color: .orange)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 4) {
                     ForEach(WeaponKind.allCases.filter { (session.level.isSandbox || session.progress.isUnlocked($0)) && (session.level.modifier != .limitedWeapons || $0 == .bowlingBall) }) { weapon in
@@ -687,15 +727,28 @@ private struct GameContainerView: View {
                 }
             }
             Spacer()
-            Text("TRAPS").font(.system(size: 9, weight: .black)).foregroundStyle(.white.opacity(0.55))
+            sectionSign("TRAPS", color: .cyan)
             ForEach(TrapKind.allCases.filter { session.progress.isUnlocked($0) }) { trap in
                 CooldownButton(title: trap.title, icon: trap.icon, remaining: session.trapCooldowns[trap, default: 0]) { session.use(trap) }
             }
         }
-        .padding(.horizontal, 5)
-        .padding(.vertical, 4)
-        .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.orange.opacity(0.38)))
+        .padding(.horizontal, 6)
+        .padding(.vertical, 5)
+        .background(LinearGradient(colors: [Color(red: 0.12, green: 0.105, blue: 0.085).opacity(0.92), .black.opacity(0.90)], startPoint: .top, endPoint: .bottom), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.orange.opacity(0.54), lineWidth: 1.2))
+        .overlay(alignment: .top) { Rectangle().fill(Color.orange.opacity(0.44)).frame(height: 2).padding(.horizontal, 18) }
+        .shadow(color: .black.opacity(0.52), radius: 8, y: 4)
+    }
+
+    private func sectionSign(_ title: String, color: Color) -> some View {
+        Text(title)
+            .font(.system(size: 8, weight: .black, design: .rounded))
+            .tracking(0.7)
+            .foregroundStyle(.white.opacity(0.84))
+            .padding(.horizontal, 8)
+            .frame(height: 28)
+            .background(LinearGradient(colors: [color.opacity(0.34), .black.opacity(0.82)], startPoint: .top, endPoint: .bottom), in: UnevenRoundedRectangle(topLeadingRadius: 8, bottomLeadingRadius: 3, bottomTrailingRadius: 8, topTrailingRadius: 3))
+            .overlay(UnevenRoundedRectangle(topLeadingRadius: 8, bottomLeadingRadius: 3, bottomTrailingRadius: 8, topTrailingRadius: 3).stroke(color.opacity(0.72)))
     }
 
     private var sandboxControls: some View {
@@ -736,20 +789,25 @@ private struct GameContainerView: View {
 
         var body: some View {
             Button(action: action) {
-                VStack(spacing: 1) {
-                    Image(icon)
-                        .resizable()
+                HStack(spacing: 4) {
+                    BundledArtImage(name: icon, subdirectory: "Art/Weapons")
                         .scaledToFit()
-                        .frame(width: 21, height: 18)
+                        .frame(width: 22, height: 22)
                     Text(remaining > 0 ? "\(Int(ceil(remaining)))" : title.uppercased())
                         .font(.system(size: 7, weight: .black))
                         .lineLimit(1)
+                        .minimumScaleFactor(0.66)
                 }
-                .frame(minWidth: 50, minHeight: 32)
+                .padding(.horizontal, 7)
+                .frame(minWidth: 62, minHeight: 34)
+                .foregroundStyle(remaining <= 0 ? .white : .white.opacity(0.48))
+                .background(LinearGradient(colors: [Color.orange.opacity(remaining <= 0 ? 0.42 : 0.10), .black.opacity(0.88)], startPoint: .topLeading, endPoint: .bottomTrailing), in: UnevenRoundedRectangle(topLeadingRadius: 9, bottomLeadingRadius: 4, bottomTrailingRadius: 9, topTrailingRadius: 4))
+                .overlay(UnevenRoundedRectangle(topLeadingRadius: 9, bottomLeadingRadius: 4, bottomTrailingRadius: 9, topTrailingRadius: 4).stroke((remaining <= 0 ? Color.orange : Color.gray).opacity(0.68)))
+                .overlay(alignment: .topTrailing) { MenuRivet(color: remaining <= 0 ? .orange : .gray).padding(4) }
                 .overlay(alignment: .bottom) {
                     if remaining > 0 {
                         GeometryReader { proxy in
-                            Rectangle()
+                            Capsule()
                                 .fill(Color.cyan.opacity(0.8))
                                 .frame(width: proxy.size.width * min(1, remaining / 10), height: 2)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -758,7 +816,7 @@ private struct GameContainerView: View {
                     }
                 }
             }
-            .hudButton(active: remaining <= 0, compact: true)
+            .buttonStyle(.plain)
             .disabled(remaining > 0)
             .scaleEffect(poppedReady ? 1.10 : 1)
             .animation(.spring(response: 0.25, dampingFraction: 0.45), value: poppedReady)
@@ -777,15 +835,17 @@ private struct GameContainerView: View {
 
     private func stat(_ label: String, _ value: String, icon: String, color: Color) -> some View {
         HStack(spacing: 7) {
-            Image(icon).resizable().scaledToFit().frame(width: 22, height: 22)
+            BundledArtImage(name: icon, subdirectory: "Art/UI/Icons").scaledToFit().frame(width: 22, height: 22)
             VStack(alignment: .leading, spacing: 0) {
-                Text(label).font(.system(size: 8, weight: .black)).foregroundStyle(.white.opacity(0.55))
-                Text(value).font(.system(size: 15, weight: .black, design: .rounded)).foregroundStyle(.white)
+                Text(label).font(.system(size: 7, weight: .black)).tracking(0.7).foregroundStyle(color.opacity(0.78))
+                Text(value).font(.system(size: 14, weight: .black, design: .rounded)).foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.62)
             }
         }
-        .padding(.horizontal, 11)
+        .padding(.horizontal, 10)
         .frame(height: 42)
-        .background(.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 13))
+        .background(LinearGradient(colors: [color.opacity(0.16), .black.opacity(0.78)], startPoint: .topLeading, endPoint: .bottomTrailing), in: UnevenRoundedRectangle(topLeadingRadius: 11, bottomLeadingRadius: 5, bottomTrailingRadius: 11, topTrailingRadius: 5))
+        .overlay(UnevenRoundedRectangle(topLeadingRadius: 11, bottomLeadingRadius: 5, bottomTrailingRadius: 11, topTrailingRadius: 5).stroke(color.opacity(0.45)))
+        .overlay(alignment: .bottomLeading) { Capsule().fill(color.opacity(0.72)).frame(width: 34, height: 2).padding(.leading, 8).offset(y: -3) }
     }
 
     private var tutorial: some View {
@@ -1078,7 +1138,11 @@ private struct BundledArtImage: View {
     private var image: UIImage? {
         if let named = UIImage(named: name) { return named }
 
-        let candidateDirectories: [String?] = [subdirectory, "Resources/\(subdirectory)", nil]
+        let commonDirectories = ["Art/UI/Icons", "Art/Weapons", "Art/Equipment"]
+        let candidateDirectories: [String?] = [subdirectory, "Resources/\(subdirectory)"]
+            + commonDirectories
+            + commonDirectories.map { "Resources/\($0)" }
+            + [nil]
         for directory in candidateDirectories {
             if let url = Bundle.main.url(forResource: name, withExtension: "png", subdirectory: directory),
                let image = UIImage(contentsOfFile: url.path) {
