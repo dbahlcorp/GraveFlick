@@ -14,6 +14,7 @@ struct GameHUDSnapshot {
     let score: Int
     let wave: Int
     let waveStatus: String
+    let waveStatusHighlighted: Bool
     let health: Int
     let specialCharge: Double
     let weaponCooldowns: [WeaponKind: TimeInterval]
@@ -50,7 +51,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var health: Int
     private var wave = 1
     private var waveStatus = "WAVE 1"
+    private var waveStatusHighlighted = false
     private var spawnedInWave = 0
+    private var currentWaveTarget = 0
     private var intermissionRemaining: TimeInterval = 0
     private var combo = 0
     private var maxCombo = 0
@@ -109,11 +112,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         buildEnvironment()
         buildBossHUD()
         SoundManager.shared.updateGameplayMix(wave: wave, healthFraction: 1)
+        if level.isSandbox { waveStatus = "SANDBOX" }
         notifyDelegate()
         announce(text: level.title.uppercased(), color: .white)
         if !level.isSandbox {
-            spawnZombie(forceWalker: true)
-            if !level.isEndless { spawnedInWave = 1 }
+            // Skip the forced tutorial walker when wave 1 is itself the boss wave, so its spawn
+            // doesn't silently consume the boss wave's spawn quota before the boss ever appears.
+            let opensOnBoss = !level.isEndless && GameRules.storyBossKind(levelID: level.id, wave: wave, totalWaves: level.totalWaves) != nil
+            if !opensOnBoss {
+                spawnZombie(forceWalker: true)
+                if !level.isEndless { spawnedInWave = 1 }
+            }
         }
     }
 
@@ -141,6 +150,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 announce(text: incomingBoss.map { "\($0.displayName) INCOMING" } ?? "WAVE \(wave)", color: .white)
             }
             waveStatus = "SURVIVE"
+            waveStatusHighlighted = false
             let difficulty = GameRules.survivalDifficulty(wave: wave, baseSpawnInterval: level.baseSpawnInterval)
             let interval = difficulty.spawnInterval
             if timeSinceSpawn >= interval {
@@ -189,6 +199,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                     spawnedInWave = 0
                     timeSinceSpawn = 99
                     waveStatus = "WAVE \(wave)"
+                    waveStatusHighlighted = false
                     SoundManager.shared.updateGameplayMix(wave: wave, healthFraction: CGFloat(health) / CGFloat(max(1, startingHealth)))
                     let boss = GameRules.storyBossKind(levelID: level.id, wave: wave, totalWaves: level.totalWaves)
                     announce(text: boss.map { "\($0.displayName) INCOMING" } ?? "WAVE \(wave)", color: .white)
@@ -201,6 +212,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let target = bossKind == nil
             ? GameRules.campaignSpawnCount(wave: wave, waveDuration: level.waveDuration, baseSpawnInterval: level.baseSpawnInterval)
             : 1
+        currentWaveTarget = target
         let interval = max(0.48, (level.baseSpawnInterval - Double(wave - 1) * 0.09) * settings.difficulty.spawnRate)
         if spawnedInWave < target, timeSinceSpawn >= interval {
             timeSinceSpawn = 0
@@ -221,11 +233,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             spawningFinished = wave >= level.totalWaves
             intermissionRemaining = 1.25
             waveStatus = spawningFinished ? "NIGHT CLEARED" : "WAVE \(wave) CLEAR"
+            waveStatusHighlighted = true
             announce(text: waveStatus, color: SKColor(red: 1, green: 0.77, blue: 0.24, alpha: 1))
             SoundManager.shared.play(.waveClear)
         } else {
             let unspawned = max(0, target - spawnedInWave)
             waveStatus = "\(livingCount + unspawned) LEFT"
+            waveStatusHighlighted = false
         }
     }
 
@@ -340,8 +354,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
 
         if let zombie = zombieBody(in: bodies), bodies.contains(where: { $0.categoryBitMask == PhysicsCategory.weapon }) {
-            if bodies.contains(where: { $0.categoryBitMask == PhysicsCategory.weapon && $0.node?.name == "bowlingBall" }) {
-                SoundManager.shared.play(.bowlingImpact)
+            if let weaponKind = bodies.lazy.compactMap({ body -> WeaponKind? in
+                guard body.categoryBitMask == PhysicsCategory.weapon, let name = body.node?.name else { return nil }
+                return WeaponKind(rawValue: name)
+            }).first, let sound = impactSound(for: weaponKind) {
+                SoundManager.shared.play(sound)
             }
             playCombatVFX(.zombieSplatter, at: contact.contactPoint, size: 92, direction: zombie.approachesFromLeft ? -1 : 1)
             let baseDamage: CGFloat = zombie.kind == .brute ? 1.8 : 4
@@ -367,6 +384,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private enum DefeatReason { case impact, collision, weapon, trap, thrownOut, explosion }
+
+    /// Central place for weapon-specific impact sounds, keyed by the WeaponKind name every weapon
+    /// node is now tagged with, so a new weapon needing a unique impact sound is one case here
+    /// instead of another hardcoded node-name branch in didBegin.
+    private func impactSound(for weaponKind: WeaponKind) -> SoundManager.Effect? {
+        weaponKind == .bowlingBall ? .bowlingImpact : nil
+    }
 
     private func resolveImpact(on zombie: ZombieNode, damage: CGFloat) {
         SoundManager.shared.play(.impact)
@@ -613,7 +637,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             bossHUD.isHidden = true
             SoundManager.shared.updateGameplayMix(wave: wave, healthFraction: CGFloat(health) / CGFloat(max(1, startingHealth)))
         }
-        if !finishingReplayUsed, !settings.reducedMotion, (zombie.kind.isBoss || (!level.isEndless && !level.isSandbox && spawningFinished && activeZombies.filter({ !$0.isDefeated }).count == 1)) {
+        // Computed fresh here rather than trusting `spawningFinished`: that flag only updates once
+        // per frame in updateCampaignWave, which runs before this frame's physics contacts resolve,
+        // so it's always one kill behind the zombie that's actually dying right now.
+        let isFinalCampaignKill = !level.isEndless && !level.isSandbox
+            && wave >= level.totalWaves
+            && spawnedInWave >= currentWaveTarget
+            && activeZombies.allSatisfy { $0.isDefeated }
+        if !finishingReplayUsed, !settings.reducedMotion, (zombie.kind.isBoss || isFinalCampaignKill) {
             finishingReplayUsed = true
             world.speed = 0.22
             run(.sequence([.wait(forDuration: 0.5), .run { [weak self] in self?.world.speed = 1 }]), withKey: "finisherReplay")
@@ -624,7 +655,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             playCombatVFX(.zombieSplatter, at: point, size: zombie.kind.isBoss ? 210 : (zombie.kind == .brute ? 156 : 118), direction: zombie.approachesFromLeft ? -1 : 1)
         }
         SoundManager.shared.play(.defeat, comboScale: combo)
-        if zombie.kind.isBoss || zombie.kind == .brute || zombie.kind == .volatile || Int.random(in: 0..<3) == 0 {
+        if zombie.kind.isBoss || zombie.kind.alwaysVocalizesOnDefeat || Int.random(in: 0..<3) == 0 {
             SoundManager.shared.playZombieVoice(for: zombie.kind, moment: .defeat, pan: audioPan(for: zombie))
         }
         runHaptic(.medium)
@@ -671,7 +702,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func launchBowlingBall() {
         let ball = SKSpriteNode(texture: EquipmentArt.bowlingBall.texture)
         ball.size = EquipmentArt.bowlingBall.fittedSize(inside: CGSize(width: 82, height: 82))
-        ball.name = "bowlingBall"
+        ball.name = WeaponKind.bowlingBall.rawValue
         ball.position = CGPoint(x: -35, y: groundY + 34)
         ball.zPosition = 30
         ball.physicsBody = SKPhysicsBody(circleOfRadius: 27)
@@ -754,6 +785,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func dropAnvils() {
         for zombie in activeZombies.filter({ !$0.isDefeated }).prefix(3) {
             let anvil = SKSpriteNode(texture: WeaponKind.anvil.authoredTexture, size: CGSize(width: 82, height: 68))
+            anvil.name = WeaponKind.anvil.rawValue
             anvil.position = CGPoint(x: zombie.position.x, y: size.height + 45)
             anvil.zPosition = 40
             anvil.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: 58, height: 42))
@@ -780,7 +812,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func launchPropaneTank() {
         let tank = SKSpriteNode(texture: WeaponKind.propaneTank.authoredTexture, size: CGSize(width: 86, height: 58))
-        tank.name = "weapon"
+        tank.name = WeaponKind.propaneTank.rawValue
         tank.position = CGPoint(x: -50, y: groundY + 34)
         tank.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: 82, height: 34))
         tank.physicsBody?.mass = 3
@@ -807,7 +839,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func swingWreckingBall() {
         let ball = SKSpriteNode(texture: WeaponKind.wreckingBall.authoredTexture, size: CGSize(width: 118, height: 118))
-        ball.name = "weapon"
+        ball.name = WeaponKind.wreckingBall.rawValue
         ball.position = CGPoint(x: -70, y: size.height * 0.56)
         ball.physicsBody = SKPhysicsBody(circleOfRadius: 50)
         ball.physicsBody?.isDynamic = false
@@ -851,7 +883,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func launchDeliveryTruck() {
         let truck = SKSpriteNode(texture: WeaponKind.deliveryTruck.authoredTexture, size: CGSize(width: 190, height: 104))
-        truck.name = "weapon"
+        truck.name = WeaponKind.deliveryTruck.rawValue
         truck.position = CGPoint(x: -120, y: groundY + 48)
         truck.zPosition = 35
         truck.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: 175, height: 80))
@@ -1162,6 +1194,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             score: score,
             wave: wave,
             waveStatus: waveStatus,
+            waveStatusHighlighted: waveStatusHighlighted,
             health: health,
             specialCharge: specialCharge,
             weaponCooldowns: weaponCooldowns,

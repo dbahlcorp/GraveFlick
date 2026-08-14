@@ -127,7 +127,7 @@ final class SoundManager {
         }
 
         // The procedural loop is a safe fallback if the packaged WAV ever fails to load.
-        guard menuPlayer?.play() == true else { playProceduralGameplayMusic(); return }
+        guard menuPlayer?.play() == true else { playProceduralMenuMusic(); return }
         gameplayPlayer?.setVolume(0, fadeDuration: 0.35)
         menuPlayer?.setVolume(menuMusicVolume, fadeDuration: 0.35)
         stopPlayerAfterFade(gameplayPlayer, unless: .gameplay)
@@ -152,9 +152,17 @@ final class SoundManager {
     }
 
     private func playProceduralGameplayMusic() {
+        playProceduralMusic(notes: [55, 65.41, 73.42, 49], duration: 8, pulseScale: 0.035)
+    }
+
+    /// A calmer, higher fallback loop for the menu so a failed WAV load doesn't leave the player
+    /// hearing the low, bassy combat-ambience cue while sitting at the main menu.
+    private func playProceduralMenuMusic() {
+        playProceduralMusic(notes: [49, 58.27, 65.41, 43.65], duration: 10, pulseScale: 0.028)
+    }
+
+    private func playProceduralMusic(notes: [Double], duration: Double, pulseScale: Double) {
         guard settings.musicEnabled, !musicNode.isPlaying else { return }
-        let notes: [Double] = [55, 65.41, 73.42, 49]
-        let duration = 8.0
         guard let buffer = makeBuffer(duration: duration) else { return }
         let frames = Int(buffer.frameLength)
         let sampleRate = format.sampleRate
@@ -162,7 +170,7 @@ final class SoundManager {
             for index in 0..<frames {
                 let time = Double(index) / sampleRate
                 let note = notes[min(notes.count - 1, Int(time / 2))]
-                let pulse = (sin(time * .pi) * 0.5 + 0.5) * 0.035
+                let pulse = (sin(time * .pi) * 0.5 + 0.5) * pulseScale
                 channel[index] = Float((sin(2 * .pi * note * time) + 0.35 * sin(2 * .pi * note * 2 * time)) * pulse)
             }
         }
@@ -298,10 +306,18 @@ final class SoundManager {
         }
     }
 
+    private var lastZombieVoiceTime: TimeInterval = 0
+
+    /// zombieVocal does real per-sample synthesis (tens of thousands of sin/pow/tanh calls), so
+    /// this throttle bounds how many can stack up in one frame when several zombies spawn/attack
+    /// at once — without it, a busy moment could pile up multiple multi-millisecond calls.
     func playZombieVoice(for kind: ZombieKind, moment: ZombieVoiceMoment, pan: Float = 0) {
-        guard settings.soundEnabled,
-              let node = effectNodes.first(where: { !$0.isPlaying }),
+        guard settings.soundEnabled else { return }
+        let now = Date().timeIntervalSinceReferenceDate
+        guard now - lastZombieVoiceTime >= 0.05 else { return }
+        guard let node = effectNodes.first(where: { !$0.isPlaying }),
               let buffer = zombieVocal(zombieVoiceSpec(for: kind, moment: moment)) else { return }
+        lastZombieVoiceTime = now
         node.pan = max(-0.9, min(0.9, pan))
         node.volume = Float(settings.soundVolume)
         node.scheduleBuffer(buffer)
@@ -392,7 +408,7 @@ final class SoundManager {
             let highFrequency = spec.high * pow(max(0.55, min(1.8, 2 - spec.sweep)), progress)
             lowPhase += 2 * .pi * lowFrequency / sampleRate
             highPhase += 2 * .pi * highFrequency / sampleRate
-            filteredNoise = filteredNoise * 0.76 + Float.random(in: -1...1) * 0.24
+            filteredNoise = nextFilteredNoise(filteredNoise, smoothing: 0.76)
             let body = Float(sin(lowPhase) + 0.28 * sin(lowPhase * 2.03))
             let edge = Float(sin(highPhase))
             let pulsePhase = (progress * Double(pulseCount)).truncatingRemainder(dividingBy: 1)
@@ -482,8 +498,7 @@ final class SoundManager {
             let localTime = time - beat.offset
             let progress = Float(localTime / beat.duration)
             let toneSample = Float(sin(2 * Double.pi * 58 * localTime))
-            let rawNoise = Float.random(in: -1...1)
-            filteredNoise = filteredNoise * 0.85 + rawNoise * 0.15
+            filteredNoise = nextFilteredNoise(filteredNoise, smoothing: 0.85)
             let sample = toneSample * 0.75 + filteredNoise * 0.25
             let decayEnvelope = exp(-progress * 4.2)
             channel[index] = sample * beat.volume * decayEnvelope
@@ -549,7 +564,7 @@ final class SoundManager {
 
             let throat = Float(sin(throatPhase) + 0.34 * sin(throatPhase * 2.01) + 0.16 * sin(throatPhase * 3.03))
             let mouth = Float(sin(formantPhase)) * (0.32 + 0.68 * abs(Float(sin(throatPhase))))
-            filteredNoise = filteredNoise * 0.88 + Float.random(in: -1...1) * 0.12
+            filteredNoise = nextFilteredNoise(filteredNoise, smoothing: 0.88)
             let voiced = throat * (1 - spec.noiseMix) + (mouth * 0.42 + filteredNoise * 0.58) * spec.noiseMix
             let attackEnvelope = index < attack ? Float(index) / Float(attack) : 1
             let decayEnvelope = Float(pow(1 - progress, 1.35))
@@ -575,8 +590,7 @@ final class SoundManager {
 
             var sample = toneSample
             if spec.noiseMix > 0 {
-                let rawNoise = Float.random(in: -1...1)
-                filteredNoise = filteredNoise * 0.8 + rawNoise * 0.2
+                filteredNoise = nextFilteredNoise(filteredNoise, smoothing: 0.8)
                 sample = toneSample * (1 - spec.noiseMix) + filteredNoise * spec.noiseMix
             }
 
@@ -585,6 +599,12 @@ final class SoundManager {
             channel[index] = sample * spec.volume * attackEnvelope * decayEnvelope
         }
         return buffer
+    }
+
+    /// One-pole low-pass filtered noise step shared by every synth voice below, so a smoothing-
+    /// coefficient fix made for one voice doesn't silently fail to propagate to the others.
+    private func nextFilteredNoise(_ previous: Float, smoothing: Float) -> Float {
+        previous * smoothing + Float.random(in: -1...1) * (1 - smoothing)
     }
 
     private func makeBuffer(duration: Double) -> AVAudioPCMBuffer? {

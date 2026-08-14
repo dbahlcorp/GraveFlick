@@ -43,6 +43,7 @@ final class GameSessionModel: ObservableObject, GameSceneDelegate {
     @Published private(set) var score = 0
     @Published private(set) var wave = 1
     @Published private(set) var waveStatus = "WAVE 1"
+    @Published private(set) var waveStatusHighlighted = false
     @Published private(set) var health = GameRules.startingHealth
     @Published private(set) var specialCharge = 0.0
     @Published private(set) var weaponCooldowns: [WeaponKind: TimeInterval] = [:]
@@ -71,6 +72,7 @@ final class GameSessionModel: ObservableObject, GameSceneDelegate {
         score = snapshot.score
         wave = snapshot.wave
         waveStatus = snapshot.waveStatus
+        waveStatusHighlighted = snapshot.waveStatusHighlighted
         health = snapshot.health
         specialCharge = snapshot.specialCharge
         weaponCooldowns = snapshot.weaponCooldowns
@@ -230,6 +232,18 @@ private struct MainMenuView: View {
                         .foregroundStyle(.white.opacity(0.82))
                         .lineLimit(1)
                         .minimumScaleFactor(0.72)
+
+                        if let bestSurvival = store.progress.highScores[GameLevel.endless.id] {
+                            HStack(spacing: 8) {
+                                Image("ui_survival").resizable().scaledToFit().frame(width: 16, height: 16)
+                                Text("BEST SURVIVAL SCORE \(bestSurvival)")
+                                Spacer(minLength: 8)
+                            }
+                            .font(.system(size: 9, weight: .black))
+                            .foregroundStyle(.white.opacity(0.62))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.72)
+                        }
                     }
                     .frame(width: min(max(330, geometry.size.width * 0.46), 460))
                     .roadsidePanel(padding: 12)
@@ -601,7 +615,7 @@ private struct GameContainerView: View {
                 gameplayHUD
                 Text(session.waveStatus)
                     .font(.caption.weight(.black))
-                    .foregroundStyle(session.waveStatus.contains("CLEAR") ? Color.yellow : Color.white.opacity(0.82))
+                    .foregroundStyle(session.waveStatusHighlighted ? Color.yellow : Color.white.opacity(0.82))
                     .padding(.horizontal, 14)
                     .padding(.vertical, 5)
                     .background(.black.opacity(0.62), in: Capsule())

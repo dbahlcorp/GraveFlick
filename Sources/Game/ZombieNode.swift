@@ -139,6 +139,9 @@ enum ZombieKind: String, CaseIterable, Codable {
         default: 1
         }
     }
+
+    /// Kinds that always growl on defeat rather than rolling the ambient random-vocalization chance.
+    var alwaysVocalizesOnDefeat: Bool { self == .brute || self == .volatile }
 }
 
 private enum RigPart: CaseIterable {
