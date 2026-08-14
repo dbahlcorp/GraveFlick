@@ -36,7 +36,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private let progress: PlayerProgress
 
     var isGameplayPaused = false {
-        didSet { world.isPaused = isGameplayPaused }
+        didSet {
+            world.isPaused = isGameplayPaused
+            // Pausing `world` stops actions/physics but not touchesMoved/Ended — an in-progress
+            // drag could otherwise still resolve into a fired shot while the game visibly looks
+            // frozen (e.g. a second finger hits the pause button mid-flick). Cancel any armed/
+            // mid-gesture weapon the moment we pause so that can't happen.
+            if isGameplayPaused { cancelArmedWeapon() }
+        }
     }
 
     private let world = SKNode()
@@ -459,6 +466,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         aimPreviewNode = nil
     }
 
+    /// Public entry point for cleanup callers outside the touch-handling code (pausing,
+    /// backgrounding, level finish) — a plain `cancelAim()` call skips the HUD refresh those
+    /// sites need, since they're not already about to call `notifyDelegate()` themselves.
+    func cancelArmedWeapon() {
+        guard armedWeapon != nil else { return }
+        cancelAim()
+        notifyDelegate()
+    }
+
     /// Hands the preview node off to the fire function (which turns it into the live projectile)
     /// without removing it from the scene, unlike `cancelAim` — an explicit cancel discards the
     /// preview, but a completed shot keeps it flying.
@@ -567,7 +583,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         switch kind {
         case .bowlingBall:
             let ball = SKSpriteNode(texture: EquipmentArt.bowlingBall.texture)
-            ball.size = EquipmentArt.bowlingBall.fittedSize(inside: CGSize(width: 82, height: 82))
+            ball.size = EquipmentArt.bowlingBall.fittedSize(inside: CGSize(width: 67, height: 67))
             ball.name = WeaponKind.bowlingBall.rawValue
             ball.position = weaponReadySpot(for: kind)
             ball.zPosition = 30
@@ -1124,14 +1140,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func launchBowlingBall(preview: SKNode?, velocity: CGVector) {
         let ball = (preview as? SKSpriteNode) ?? {
             let fallback = SKSpriteNode(texture: EquipmentArt.bowlingBall.texture)
-            fallback.size = EquipmentArt.bowlingBall.fittedSize(inside: CGSize(width: 82, height: 82))
+            fallback.size = EquipmentArt.bowlingBall.fittedSize(inside: CGSize(width: 67, height: 67))
             fallback.position = CGPoint(x: size.width * 0.5, y: groundY + 34)
             world.addChild(fallback)
             return fallback
         }()
         ball.name = WeaponKind.bowlingBall.rawValue
         ball.zPosition = 30
-        ball.physicsBody = SKPhysicsBody(circleOfRadius: 27)
+        // Matches the ~82% shrink applied to ZombieKind.size — a full-size ball rolling through
+        // the now-smaller zombies would be relatively chunkier than intended, hitting more of
+        // each body than the original size ratio called for.
+        ball.physicsBody = SKPhysicsBody(circleOfRadius: 22)
         ball.physicsBody?.mass = 3.5
         ball.physicsBody?.restitution = 0.32
         ball.physicsBody?.friction = 0.7
@@ -1434,7 +1453,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let rawLength = max(1, hypot(raw.dx, raw.dy))
         let unit = CGVector(dx: raw.dx / rawLength, dy: raw.dy / rawLength)
         let lineEnd = CGPoint(x: origin.x + unit.dx * size.width * 1.6, y: origin.y + unit.dy * size.width * 1.6)
-        let tolerance: CGFloat = 26
+        // Matches the ~82% shrink applied to ZombieKind.size, so the pierce band still tracks
+        // roughly one body-width instead of becoming relatively wider than the zombies it's
+        // testing against.
+        let tolerance: CGFloat = 21
 
         let pierced = activeZombies.filter { !$0.isDefeated }.compactMap { zombie -> (zombie: ZombieNode, along: CGFloat)? in
             let toZombie = CGVector(dx: zombie.position.x - origin.x, dy: zombie.position.y - origin.y)
@@ -1795,6 +1817,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func finish(won: Bool) {
         guard !gameOver else { return }
         gameOver = true
+        // touchesMoved/Ended don't check `gameOver` (only touchesBegan does), so a weapon that
+        // was mid-drag the instant the level ended could otherwise still fire after the result
+        // modal appears.
+        cancelArmedWeapon()
         if won { dinerNode?.celebrateDefender() }
         selectedZombies.removeAll()
         touchSamples.removeAll()
