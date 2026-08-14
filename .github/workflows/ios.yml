@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       upload_testflight:
-        description: "Build, sign, and upload build 6 to TestFlight"
+        description: "Build, sign, and upload build 7 to TestFlight"
         required: true
         type: boolean
         default: false
@@ -57,7 +57,7 @@ jobs:
           CODE_SIGNING_ALLOWED=NO
 
   testflight:
-    name: TestFlight build 6
+    name: TestFlight build 7
     if: github.event_name == 'workflow_dispatch' && inputs.upload_testflight
     needs: build
     runs-on: macos-26
@@ -70,7 +70,7 @@ jobs:
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
       ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      BUILD_NUMBER: "6"
+      BUILD_NUMBER: "7"
     steps:
       - uses: actions/checkout@v4
       - name: Validate release secrets
@@ -108,7 +108,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: GraveFlick-TestFlight-6
+          name: GraveFlick-TestFlight-7
           path: |
             build/GraveFlick.ipa
             build/GraveFlick.app.dSYM.zip
