@@ -67,6 +67,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var sandboxDefeats = 0
     private var finishingReplayUsed = false
     private var sceneryDamage = 0
+    /// .doubleSided alternates strictly left/right/left/right rather than trusting Bool.random(),
+    /// which could otherwise streak several spawns from the same side and read as a standard mission.
+    private var nextDoubleSidedFromLeft = true
     private let bossHUD = SKNode()
     private let bossHealthFill = SKShapeNode(rectOf: CGSize(width: 260, height: 12), cornerRadius: 6)
     private let bossNameLabel = SKLabelNode(fontNamed: "AvenirNext-Heavy")
@@ -375,8 +378,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guard let zombie = selectedZombies.removeValue(forKey: key) else { return }
         let location = touch.location(in: self)
         touchSamples[key, default: []].append((location, touch.timestamp))
+        let samples = touchSamples.removeValue(forKey: key) ?? []
+        guard !selectedZombies.values.contains(where: { $0 === zombie }) else {
+            // A second touch is still holding this zombie (dual-touch pinch) — only stop
+            // tracking this finger; the remaining touch keeps driving it via touchesMoved.
+            return
+        }
         zombie.position = CGPoint(x: location.x, y: max(groundY + zombie.kind.size.height * 0.39 + 4, location.y))
-        var velocity = FlickMath.velocity(from: touchSamples.removeValue(forKey: key) ?? [])
+        var velocity = FlickMath.velocity(from: samples)
         if hypot(velocity.dx, velocity.dy) < 140 { velocity.dy = 180 }
         zombie.release(with: velocity, powerMultiplier: flickMultiplier)
         if hypot(velocity.dx, velocity.dy) > 1_850 {
@@ -493,7 +502,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let unlockedCount = min(level.enemyRoster.count, max(1, 1 + wave))
         let roster = Array(level.enemyRoster.prefix(unlockedCount))
         let kind = forcedKind ?? bossKind ?? (level.modifier == .volatileRush ? .volatile : (level.modifier == .waitressRush ? .waitress : (forceWalker ? (roster.contains(.walker) ? ZombieKind.walker : roster[0]) : roster.randomElement()!)))
-        let fromLeft = level.modifier == .leftOnly ? true : (level.modifier == .rightOnly ? false : Bool.random())
+        let fromLeft: Bool
+        switch level.modifier {
+        case .leftOnly: fromLeft = true
+        case .rightOnly: fromLeft = false
+        case .doubleSided:
+            fromLeft = nextDoubleSidedFromLeft
+            nextDoubleSidedFromLeft.toggle()
+        default: fromLeft = Bool.random()
+        }
         let difficulty = level.isEndless ? GameRules.survivalDifficulty(wave: wave, baseSpawnInterval: level.baseSpawnInterval) : nil
         let zombie = ZombieNode(
             kind: kind,
@@ -807,13 +824,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             debris.position = zombie.position
             debris.zPosition = 28
             world.addChild(debris)
-            debris.physicsBody?.applyImpulse(CGVector(dx: CGFloat(index - 2) * 18 * impulseScale, dy: CGFloat(85 + index * 14) * impulseScale))
-            debris.physicsBody?.angularVelocity = CGFloat(index - 3) * 1.7
+            let spread = CGFloat(index - 2) * 34 + CGFloat.random(in: -22...22)
+            debris.physicsBody?.applyImpulse(CGVector(dx: spread * impulseScale, dy: CGFloat.random(in: 70...150) * impulseScale))
+            debris.physicsBody?.angularVelocity = CGFloat.random(in: -5...5)
             debris.run(.sequence([.wait(forDuration: 2.4), .fadeOut(withDuration: 0.5), .removeFromParent()]))
-        }
-        for index in 1..<pieces.count {
-            guard let bodyA = pieces[index - 1].physicsBody, let bodyB = pieces[index].physicsBody else { continue }
-            physicsWorld.add(SKPhysicsJointPin.joint(withBodyA: bodyA, bodyB: bodyB, anchor: zombie.position))
         }
         let decal = SKShapeNode(ellipseOf: CGSize(width: zombie.kind.isBoss ? 120 : 68, height: 18))
         decal.fillColor = SKColor(red: 0.22, green: 0.42, blue: 0.08, alpha: 0.48)

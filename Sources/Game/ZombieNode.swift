@@ -672,8 +672,7 @@ final class ZombieNode: SKNode {
             if nextPhase != bossPhase {
                 bossPhase = nextPhase
                 abilityTime = max(abilityTime, 3)
-                let tint: SKColor = nextPhase == 3 ? .red : .orange
-                sprites.values.forEach { $0.color = tint; $0.colorBlendFactor = 0.18 }
+                applyBossPhaseTint()
                 rig.run(.sequence([.scale(to: 1.1, duration: 0.16), .scale(to: 1, duration: 0.16)]), withKey: "bossPhase")
             }
         }
@@ -689,7 +688,7 @@ final class ZombieNode: SKNode {
                 }
                 run(.sequence([.wait(forDuration: 4), .run { [weak self] in
                     self?.bossIsStunned = false
-                    self?.sprites.values.forEach { $0.colorBlendFactor = 0 }
+                    self?.applyBossPhaseTint()
                 }]), withKey: "bossStun")
             }
         }
@@ -719,6 +718,19 @@ final class ZombieNode: SKNode {
             playVolatileWarning()
         }
         return health <= 0
+    }
+
+    /// Reapplies the current bossPhase's enrage tint (or clears it in phase 1). Called both on a
+    /// phase transition and when a stun wears off, so un-stunning doesn't reset an enraged boss
+    /// back to its neutral color.
+    private func applyBossPhaseTint() {
+        guard kind.isBoss else { return }
+        if bossPhase >= 2 {
+            let tint: SKColor = bossPhase >= 3 ? .red : .orange
+            sprites.values.forEach { $0.color = tint; $0.colorBlendFactor = 0.18 }
+        } else {
+            sprites.values.forEach { $0.colorBlendFactor = 0 }
+        }
     }
 
     private func playArmorBreak() {
