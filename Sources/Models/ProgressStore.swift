@@ -15,6 +15,7 @@ final class ProgressStore: ObservableObject {
         self.defaults = defaults
         progress = Self.decode(PlayerProgress.self, from: defaults.data(forKey: progressKey)) ?? PlayerProgress()
         settings = Self.decode(GameSettings.self, from: defaults.data(forKey: settingsKey)) ?? GameSettings()
+        grantCampaignWeapons()
         refreshDaily()
     }
 
@@ -34,6 +35,7 @@ final class ProgressStore: ObservableObject {
         }
         if result.won, GameLevel.campaign.indices.contains(result.levelID - 1) {
             progress.highestUnlockedLevel = min(GameLevel.campaign.count, max(progress.highestUnlockedLevel, result.levelID + 1))
+            grantCampaignWeapons()
         }
         var newAchievements: [String] = []
         if result.won { newAchievements.append("first_shift") }
@@ -132,6 +134,13 @@ final class ProgressStore: ObservableObject {
 
     private func saveProgress() {
         defaults.set(try? JSONEncoder().encode(progress), forKey: progressKey)
+    }
+
+    private func grantCampaignWeapons() {
+        let loadout = WeaponKind.campaignLoadout(through: progress.highestUnlockedLevel)
+        guard !loadout.isSubset(of: progress.unlockedWeapons) else { return }
+        progress.unlockedWeapons.formUnion(loadout)
+        saveProgress()
     }
 
     private func saveSettings() {

@@ -75,5 +75,10 @@ final class ProgressStoreTests: XCTestCase {
         XCTAssertEqual(progress.currency, 900)
         XCTAssertEqual(progress.totalDefeats, 0)
         XCTAssertEqual(progress.bestCombo, 0)
+        XCTAssertTrue(progress.isUnlocked(.shotgun))
+        XCTAssertTrue(progress.isUnlocked(.anvil))
+        XCTAssertTrue(progress.isUnlocked(.grenade))
+        XCTAssertTrue(progress.isUnlocked(.propaneTank))
+        XCTAssertFalse(progress.isUnlocked(.airstrike))
     }
 }

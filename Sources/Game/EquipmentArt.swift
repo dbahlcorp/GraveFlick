@@ -48,6 +48,13 @@ extension WeaponKind {
         texture.filteringMode = .linear
         return texture
     }
+
+    func authoredFittedSize(inside bounds: CGSize) -> CGSize {
+        let source = authoredTexture.size()
+        guard source.width > 0, source.height > 0 else { return bounds }
+        let scale = min(bounds.width / source.width, bounds.height / source.height)
+        return CGSize(width: source.width * scale, height: source.height * scale)
+    }
 }
 
 extension TrapKind {

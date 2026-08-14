@@ -13,6 +13,7 @@ enum PhysicsCategory {
 struct GameHUDSnapshot {
     let score: Int
     let wave: Int
+    let waveStatus: String
     let health: Int
     let specialCharge: Double
     let weaponCooldowns: [WeaponKind: TimeInterval]
@@ -47,6 +48,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var score = 0
     private var health: Int
     private var wave = 1
+    private var waveStatus = "WAVE 1"
+    private var spawnedInWave = 0
+    private var intermissionRemaining: TimeInterval = 0
     private var combo = 0
     private var maxCombo = 0
     private var defeats = 0
@@ -100,7 +104,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         buildBossHUD()
         notifyDelegate()
         announce(text: level.title.uppercased(), color: .white)
-        if !level.isSandbox { spawnZombie(forceWalker: true) }
+        if !level.isSandbox {
+            spawnZombie(forceWalker: true)
+            if !level.isEndless { spawnedInWave = 1 }
+        }
     }
 
     override func update(_ currentTime: TimeInterval) {
@@ -115,37 +122,32 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         timeSinceSpawn += deltaTime
         tickCooldowns(deltaTime)
 
-        let activeDuration = level.isEndless || level.isSandbox ? .infinity : level.waveDuration * Double(level.totalWaves)
         if level.isSandbox {
             // Sandbox spawns only through explicit player controls.
-        } else if level.isEndless || elapsedTime < activeDuration {
-            let newWave = level.isEndless ? Int(elapsedTime / level.waveDuration) + 1 : min(level.totalWaves, Int(elapsedTime / level.waveDuration) + 1)
+        } else if level.isEndless {
+            let newWave = Int(elapsedTime / level.waveDuration) + 1
             if newWave != wave {
                 wave = newWave
-                let incomingBoss = level.isEndless
-                    ? GameRules.bossKind(forWave: wave)
-                    : GameRules.storyBossKind(levelID: level.id, wave: wave, totalWaves: level.totalWaves)
+                let incomingBoss = GameRules.bossKind(forWave: wave)
                 announce(text: incomingBoss.map { "\($0.displayName) INCOMING" } ?? "WAVE \(wave)", color: .white)
             }
-            let difficulty = level.isEndless ? GameRules.survivalDifficulty(wave: wave, baseSpawnInterval: level.baseSpawnInterval) : nil
-            let interval = difficulty?.spawnInterval ?? max(0.48, level.baseSpawnInterval - Double(wave - 1) * 0.09)
+            waveStatus = "SURVIVE"
+            let difficulty = GameRules.survivalDifficulty(wave: wave, baseSpawnInterval: level.baseSpawnInterval)
+            let interval = difficulty.spawnInterval
             if timeSinceSpawn >= interval {
                 timeSinceSpawn = 0
-                let bossKind = level.isEndless
-                    ? GameRules.bossKind(forWave: wave)
-                    : GameRules.storyBossKind(levelID: level.id, wave: wave, totalWaves: level.totalWaves)
+                let bossKind = GameRules.bossKind(forWave: wave)
                 if let bossKind, !spawnedBossWaves.contains(wave) {
                     spawnedBossWaves.insert(wave)
                     spawnZombie(forceWalker: false, bossKind: bossKind)
                 } else if bossKind == nil {
-                    for _ in 0..<(difficulty?.spawnCount ?? 1) {
+                    for _ in 0..<difficulty.spawnCount {
                         spawnZombie(forceWalker: false)
                     }
                 }
             }
-        } else if !spawningFinished {
-            spawningFinished = true
-            announce(text: "CLEAR THE LOT", color: SKColor(red: 1, green: 0.77, blue: 0.24, alpha: 1))
+        } else {
+            updateCampaignWave(deltaTime: deltaTime)
         }
 
         let zombies = activeZombies
@@ -159,10 +161,57 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
         }
 
-        if spawningFinished, zombies.isEmpty {
-            finish(won: true)
-        }
         notifyDelegate()
+    }
+
+    private func updateCampaignWave(deltaTime: TimeInterval) {
+        if intermissionRemaining > 0 {
+            intermissionRemaining -= deltaTime
+            if intermissionRemaining <= 0 {
+                if spawningFinished {
+                    finish(won: true)
+                } else {
+                    wave += 1
+                    spawnedInWave = 0
+                    timeSinceSpawn = 99
+                    waveStatus = "WAVE \(wave)"
+                    let boss = GameRules.storyBossKind(levelID: level.id, wave: wave, totalWaves: level.totalWaves)
+                    announce(text: boss.map { "\($0.displayName) INCOMING" } ?? "WAVE \(wave)", color: .white)
+                }
+            }
+            return
+        }
+
+        let bossKind = GameRules.storyBossKind(levelID: level.id, wave: wave, totalWaves: level.totalWaves)
+        let target = bossKind == nil
+            ? GameRules.campaignSpawnCount(wave: wave, waveDuration: level.waveDuration, baseSpawnInterval: level.baseSpawnInterval)
+            : 1
+        let interval = max(0.48, (level.baseSpawnInterval - Double(wave - 1) * 0.09) * settings.difficulty.spawnRate)
+        if spawnedInWave < target, timeSinceSpawn >= interval {
+            timeSinceSpawn = 0
+            if let bossKind {
+                if !spawnedBossWaves.contains(wave) {
+                    spawnedBossWaves.insert(wave)
+                    spawnZombie(forceWalker: false, bossKind: bossKind)
+                    spawnedInWave += 1
+                }
+            } else {
+                spawnZombie(forceWalker: false)
+                spawnedInWave += 1
+            }
+        }
+
+        let livingCount = activeZombies.filter { !$0.isDefeated }.count
+        if spawnedInWave >= target, livingCount == 0 {
+            spawningFinished = wave >= level.totalWaves
+            intermissionRemaining = 1.25
+            waveStatus = spawningFinished ? "NIGHT CLEARED" : "WAVE \(wave) CLEAR"
+            announce(text: waveStatus, color: SKColor(red: 1, green: 0.77, blue: 0.24, alpha: 1))
+            SoundManager.shared.play(.waveClear)
+        } else {
+            let unspawned = max(0, target - spawnedInWave)
+            waveStatus = "\(livingCount + unspawned) LEFT"
+        }
     }
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -275,6 +324,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
 
         if let zombie = zombieBody(in: bodies), bodies.contains(where: { $0.categoryBitMask == PhysicsCategory.weapon }) {
+            if bodies.contains(where: { $0.categoryBitMask == PhysicsCategory.weapon && $0.node?.name == "bowlingBall" }) {
+                SoundManager.shared.play(.bowlingImpact)
+            }
             playCombatVFX(.zombieSplatter, at: contact.contactPoint, size: 92, direction: zombie.approachesFromLeft ? -1 : 1)
             let baseDamage: CGFloat = zombie.kind == .brute ? 1.8 : 4
             if zombie.damageAt(contact.contactPoint, amount: baseDamage * zombie.kind.weaponDamageMultiplier) { defeat(zombie, reason: .weapon) }
@@ -549,8 +601,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func launchBowlingBall() {
-        let ball = SKSpriteNode(texture: EquipmentArt.bowlingBall.actionFrames[0], size: CGSize(width: 72, height: 72))
-        ball.name = "weapon"
+        let ball = SKSpriteNode(texture: EquipmentArt.bowlingBall.texture)
+        ball.size = EquipmentArt.bowlingBall.fittedSize(inside: CGSize(width: 82, height: 82))
+        ball.name = "bowlingBall"
         ball.position = CGPoint(x: -35, y: groundY + 34)
         ball.zPosition = 30
         ball.physicsBody = SKPhysicsBody(circleOfRadius: 27)
@@ -562,8 +615,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         ball.physicsBody?.contactTestBitMask = PhysicsCategory.zombie
         ball.physicsBody?.velocity = CGVector(dx: 820, dy: 130)
         world.addChild(ball)
+        SoundManager.shared.play(.bowlingRoll)
         if !settings.reducedMotion {
-            ball.run(.repeatForever(.animate(with: EquipmentArt.bowlingBall.actionFrames, timePerFrame: 0.09, resize: false, restore: true)), withKey: "artFrames")
             ball.run(.repeatForever(.rotate(byAngle: -.pi * 2, duration: 0.38)), withKey: "roll")
         }
         ball.run(.sequence([.wait(forDuration: 5), .removeFromParent()]))
@@ -856,8 +909,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         pickup.lineWidth = 4
         pickup.position = point
         pickup.zPosition = 115
-        let art = weapon.equipmentArt
-        let icon = SKSpriteNode(texture: art.texture, size: art.fittedSize(inside: CGSize(width: 40, height: 40)))
+        let icon = SKSpriteNode(texture: weapon.authoredTexture, size: weapon.authoredFittedSize(inside: CGSize(width: 40, height: 40)))
         pickup.addChild(icon)
         world.addChild(pickup)
         pickup.run(.repeatForever(.sequence([.scale(to: 1.13, duration: 0.45), .scale(to: 0.92, duration: 0.45)])))
@@ -900,6 +952,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         gameDelegate?.gameScene(self, didUpdate: GameHUDSnapshot(
             score: score,
             wave: wave,
+            waveStatus: waveStatus,
             health: health,
             specialCharge: specialCharge,
             weaponCooldowns: weaponCooldowns,

@@ -41,6 +41,7 @@ final class AppModel: ObservableObject {
 final class GameSessionModel: ObservableObject, GameSceneDelegate {
     @Published private(set) var score = 0
     @Published private(set) var wave = 1
+    @Published private(set) var waveStatus = "WAVE 1"
     @Published private(set) var health = GameRules.startingHealth
     @Published private(set) var specialCharge = 0.0
     @Published private(set) var weaponCooldowns: [WeaponKind: TimeInterval] = [:]
@@ -68,6 +69,7 @@ final class GameSessionModel: ObservableObject, GameSceneDelegate {
     func gameScene(_ scene: GameScene, didUpdate snapshot: GameHUDSnapshot) {
         score = snapshot.score
         wave = snapshot.wave
+        waveStatus = snapshot.waveStatus
         health = snapshot.health
         specialCharge = snapshot.specialCharge
         weaponCooldowns = snapshot.weaponCooldowns
@@ -539,6 +541,14 @@ private struct GameContainerView: View {
 
             VStack(spacing: 0) {
                 gameplayHUD
+                Text(session.waveStatus)
+                    .font(.caption.weight(.black))
+                    .foregroundStyle(session.waveStatus.contains("CLEAR") ? Color.yellow : Color.white.opacity(0.82))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 5)
+                    .background(.black.opacity(0.62), in: Capsule())
+                    .padding(.top, 5)
+                    .accessibilityLabel("Wave status, \(session.waveStatus)")
                 Spacer()
                 actionBar
             }

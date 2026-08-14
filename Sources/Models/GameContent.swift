@@ -85,6 +85,26 @@ enum WeaponKind: String, CaseIterable, Codable, Identifiable {
 enum GameDifficulty: String, CaseIterable, Codable, Identifiable {
     case casual, standard, nightmare
     var id: String { rawValue }
+    static let starterLoadout: Set<WeaponKind> = [.bowlingBall, .shotgun, .anvil]
+
+    var campaignUnlockLevel: Int {
+        switch self {
+        case .bowlingBall, .shotgun, .anvil: 1
+        case .grenade: 2
+        case .propaneTank: 3
+        case .airstrike: 4
+        case .sniper: 5
+        case .greaseFire: 7
+        case .transformer: 10
+        case .wreckingBall: 12
+        case .deliveryTruck: 15
+        case .meteor: 20
+        }
+    }
+
+    static func campaignLoadout(through level: Int) -> Set<String> {
+        Set(allCases.filter { $0.campaignUnlockLevel <= max(1, level) }.map(\.rawValue))
+    }
     var title: String { rawValue.uppercased() }
     var enemySpeed: CGFloat { self == .casual ? 0.82 : (self == .nightmare ? 1.24 : 1) }
     var enemyHealth: CGFloat { self == .casual ? 0.78 : (self == .nightmare ? 1.38 : 1) }
@@ -287,7 +307,7 @@ struct PlayerProgress: Codable, Equatable {
     var highScores: [Int: Int] = [:]
     var stars: [Int: Int] = [:]
     var upgradeLevels: [String: Int] = [:]
-    var unlockedWeapons: Set<String> = [WeaponKind.bowlingBall.rawValue]
+    var unlockedWeapons: Set<String> = WeaponKind.campaignLoadout(through: 1)
     var unlockedTraps: Set<String> = []
     var achievements: Set<String> = []
     var dailyDate = ""
@@ -308,7 +328,7 @@ struct PlayerProgress: Codable, Equatable {
         highScores = try v.decodeIfPresent([Int: Int].self, forKey: .highScores) ?? [:]
         stars = try v.decodeIfPresent([Int: Int].self, forKey: .stars) ?? [:]
         upgradeLevels = try v.decodeIfPresent([String: Int].self, forKey: .upgradeLevels) ?? [:]
-        unlockedWeapons = try v.decodeIfPresent(Set<String>.self, forKey: .unlockedWeapons) ?? [WeaponKind.bowlingBall.rawValue]
+        unlockedWeapons = try v.decodeIfPresent(Set<String>.self, forKey: .unlockedWeapons) ?? WeaponKind.campaignLoadout(through: highestUnlockedLevel)
         unlockedTraps = try v.decodeIfPresent(Set<String>.self, forKey: .unlockedTraps) ?? []
         achievements = try v.decodeIfPresent(Set<String>.self, forKey: .achievements) ?? []
         dailyDate = try v.decodeIfPresent(String.self, forKey: .dailyDate) ?? ""

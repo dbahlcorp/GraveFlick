@@ -20,6 +20,11 @@ enum GameRules {
         base * max(0.68, 1 - Double(rapidGearLevel) * 0.08)
     }
 
+    static func campaignSpawnCount(wave: Int, waveDuration: TimeInterval, baseSpawnInterval: TimeInterval) -> Int {
+        let baseline = Int((waveDuration / max(0.45, baseSpawnInterval)) * 0.55)
+        return min(14, max(5, baseline + max(0, wave - 1)))
+    }
+
     /// Endless mode always ends in a loss (there's no wave count to "clear"), so its coin payout
     /// is scored from performance instead of the win-gated per-level reward. Capped so a very
     /// long single run can't inflate the economy faster than clearing several story levels.

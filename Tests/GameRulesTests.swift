@@ -59,6 +59,14 @@ final class GameRulesTests: XCTestCase {
         }
     }
 
+    func testCampaignWavesHaveFiniteIncreasingSpawnQuotas() {
+        let first = GameRules.campaignSpawnCount(wave: 1, waveDuration: 16, baseSpawnInterval: 1.45)
+        let fourth = GameRules.campaignSpawnCount(wave: 4, waveDuration: 16, baseSpawnInterval: 1.45)
+        XCTAssertGreaterThanOrEqual(first, 5)
+        XCTAssertGreaterThan(fourth, first)
+        XCTAssertLessThanOrEqual(fourth, 14)
+    }
+
     func testExpandedRosterContainsThreeNewRegularsAndTwoUniqueBosses() {
         XCTAssertTrue(ZombieKind.regularCases.contains(.waitress))
         XCTAssertTrue(ZombieKind.regularCases.contains(.riot))
@@ -106,6 +114,18 @@ final class GameRulesTests: XCTestCase {
         XCTAssertEqual(Set(WeaponKind.allCases.map(\.rawValue)).count, 12)
         let progress = PlayerProgress()
         XCTAssertEqual(progress.upgradeLevel(.meteor), 0)
+        XCTAssertEqual(progress.unlockedWeapons, WeaponKind.campaignLoadout(through: 1))
+        XCTAssertTrue(progress.isUnlocked(.bowlingBall))
+        XCTAssertTrue(progress.isUnlocked(.shotgun))
+        XCTAssertTrue(progress.isUnlocked(.anvil))
+    }
+
+    func testCampaignLoadoutAddsDistinctWeaponsAsLevelsUnlock() {
+        let levelThree = WeaponKind.campaignLoadout(through: 3)
+        XCTAssertTrue(levelThree.contains(WeaponKind.grenade.rawValue))
+        XCTAssertTrue(levelThree.contains(WeaponKind.propaneTank.rawValue))
+        XCTAssertFalse(levelThree.contains(WeaponKind.airstrike.rawValue))
+        XCTAssertEqual(WeaponKind.campaignLoadout(through: 20).count, WeaponKind.allCases.count)
     }
 
     func testNewEnvironmentAndWeaponAssetsArePresent() {

@@ -5,7 +5,7 @@ final class SoundManager {
     static let shared = SoundManager()
 
     enum Effect {
-        case grab, impact, defeat, dinerHit, weapon, trap, pickup, victory, ready, heartbeat, zombieVoice, bossRoar
+        case grab, impact, defeat, dinerHit, weapon, bowlingRoll, bowlingImpact, waveClear, trap, pickup, victory, ready, heartbeat, zombieVoice, bossRoar
     }
 
     private struct ToneSpec {
@@ -89,6 +89,10 @@ final class SoundManager {
             buffer = tone(ToneSpec(frequency: 68, duration: 0.62, volume: 0.26, pitchSweep: 0.52, noiseMix: 0.48))
         case .zombieVoice:
             buffer = tone(ToneSpec(frequency: 115, duration: 0.28, volume: 0.13, pitchSweep: 0.72, noiseMix: 0.36))
+        case .bowlingRoll:
+            buffer = tone(ToneSpec(frequency: 92, duration: 0.95, volume: 0.19, pitchSweep: 0.78, noiseMix: 0.58, detune: false))
+        case .waveClear:
+            buffer = fanfare(notes: [392, 523.25, 659.25], noteDuration: 0.10, volume: 0.15)
         default:
             var toneSpec = spec(for: effect)
             if effect == .defeat {
@@ -111,9 +115,10 @@ final class SoundManager {
         case .defeat: ToneSpec(frequency: 220, duration: 0.20, volume: 0.17, pitchSweep: 1.3, noiseMix: 0.10)
         case .dinerHit: ToneSpec(frequency: 78, duration: 0.32, volume: 0.27, pitchSweep: 0.42, noiseMix: 0.42)
         case .weapon: ToneSpec(frequency: 640, duration: 0.16, volume: 0.15, pitchSweep: 1.4, noiseMix: 0.06)
+        case .bowlingImpact: ToneSpec(frequency: 82, duration: 0.26, volume: 0.27, pitchSweep: 0.48, noiseMix: 0.50, detune: false)
         case .trap: ToneSpec(frequency: 320, duration: 0.18, volume: 0.13, pitchSweep: 0.85, noiseMix: 0.10)
         case .ready: ToneSpec(frequency: 880, duration: 0.05, volume: 0.09, pitchSweep: 1.15, noiseMix: 0, detune: false)
-        case .pickup, .victory, .heartbeat, .zombieVoice, .bossRoar: ToneSpec(frequency: 660, duration: 0.1, volume: 0.13)
+        case .pickup, .victory, .heartbeat, .zombieVoice, .bossRoar, .bowlingRoll, .waveClear: ToneSpec(frequency: 660, duration: 0.1, volume: 0.13)
         }
     }
 
