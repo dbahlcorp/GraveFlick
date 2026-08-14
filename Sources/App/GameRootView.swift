@@ -50,6 +50,7 @@ final class GameSessionModel: ObservableObject, GameSceneDelegate, Identifiable 
     @Published private(set) var specialCharge = 0.0
     @Published private(set) var weaponCooldowns: [WeaponKind: TimeInterval] = [:]
     @Published private(set) var trapCooldowns: [TrapKind: TimeInterval] = [:]
+    @Published private(set) var armedWeapon: WeaponKind?
     @Published private(set) var isPaused = false
     @Published private(set) var result: LevelResult?
     @Published var showsTutorial: Bool
@@ -79,6 +80,7 @@ final class GameSessionModel: ObservableObject, GameSceneDelegate, Identifiable 
         specialCharge = snapshot.specialCharge
         weaponCooldowns = snapshot.weaponCooldowns
         trapCooldowns = snapshot.trapCooldowns
+        armedWeapon = snapshot.armedWeapon
     }
 
     func gameScene(_ scene: GameScene, didFinish result: LevelResult) {
@@ -106,7 +108,7 @@ final class GameSessionModel: ObservableObject, GameSceneDelegate, Identifiable 
         scene.isGameplayPaused = false
     }
 
-    func use(_ weapon: WeaponKind) { scene.useWeapon(weapon) }
+    func arm(_ weapon: WeaponKind) { scene.armWeapon(weapon) }
     func use(_ trap: TrapKind) { scene.useTrap(trap) }
     func useSpecial() { scene.useSpecial() }
 }
@@ -722,7 +724,7 @@ private struct GameContainerView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 4) {
                     ForEach(WeaponKind.allCases.filter { (session.level.isSandbox || session.progress.isUnlocked($0)) && (session.level.modifier != .limitedWeapons || $0 == .bowlingBall) }) { weapon in
-                        CooldownButton(title: weapon.title, icon: weapon.icon, remaining: session.weaponCooldowns[weapon, default: 0]) { session.use(weapon) }
+                        CooldownButton(title: weapon.title, icon: weapon.icon, remaining: session.weaponCooldowns[weapon, default: 0], isArmed: session.armedWeapon == weapon) { session.arm(weapon) }
                     }
                 }
             }
@@ -784,8 +786,10 @@ private struct GameContainerView: View {
         let title: String
         let icon: String
         let remaining: TimeInterval
+        var isArmed: Bool = false
         let action: () -> Void
         @State private var poppedReady = false
+        @State private var armedPulse = false
 
         var body: some View {
             Button(action: action) {
@@ -815,12 +819,18 @@ private struct GameContainerView: View {
                         .frame(height: 2)
                     }
                 }
+                .overlay(
+                    UnevenRoundedRectangle(topLeadingRadius: 9, bottomLeadingRadius: 4, bottomTrailingRadius: 9, topTrailingRadius: 4)
+                        .stroke(Color.cyan, lineWidth: 2)
+                        .opacity(isArmed ? (armedPulse ? 1 : 0.35) : 0)
+                )
             }
             .buttonStyle(.plain)
             .disabled(remaining > 0)
-            .scaleEffect(poppedReady ? 1.10 : 1)
+            .scaleEffect(poppedReady ? 1.10 : (isArmed ? 1.06 : 1))
             .animation(.spring(response: 0.25, dampingFraction: 0.45), value: poppedReady)
-            .accessibilityLabel("\(title), \(remaining > 0 ? "ready in \(Int(ceil(remaining))) seconds" : "ready")")
+            .animation(.spring(response: 0.25, dampingFraction: 0.45), value: isArmed)
+            .accessibilityLabel("\(title), \(isArmed ? "armed, aim it on the battlefield" : (remaining > 0 ? "ready in \(Int(ceil(remaining))) seconds" : "ready"))")
             .onChange(of: remaining) { oldValue, newValue in
                 guard oldValue > 0, newValue <= 0 else { return }
                 SoundManager.shared.play(.ready)
@@ -828,6 +838,11 @@ private struct GameContainerView: View {
                 Task {
                     try? await Task.sleep(nanoseconds: 180_000_000)
                     poppedReady = false
+                }
+            }
+            .onChange(of: isArmed) { _, newValue in
+                withAnimation(.easeInOut(duration: 0.5).repeatForever(autoreverses: true)) {
+                    armedPulse = newValue
                 }
             }
         }

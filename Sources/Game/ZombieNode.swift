@@ -188,6 +188,7 @@ enum ZombieAnimationState: CaseIterable, Equatable {
     case airborne
     case impact
     case recovering
+    case frozen
     case defeated
 }
 
@@ -201,6 +202,12 @@ final class ZombieNode: SKNode {
     var isGrabbed = false
     var isThrown = false
     private(set) var isDefeated = false
+    /// Set by the Flash Freezer trap only — distinct from the generic `slowTime` used by the
+    /// unrelated boss-stun mechanic, so a stunned boss doesn't briefly become brittle-physics too.
+    private(set) var isFrozenSolid = false
+    /// Ground-impact and weapon-contact damage is multiplied by this while frozen solid, so
+    /// flicking or hitting a frozen zombie into something reads as it shattering.
+    var frozenImpactDamageMultiplier: CGFloat { isFrozenSolid ? 3.5 : 1 }
     var hasResolvedImpact = false
     var highestPoint: CGFloat = 0
     private(set) var health: CGFloat
@@ -420,7 +427,9 @@ final class ZombieNode: SKNode {
             return
         }
 
-        if state == .impact || state == .attacking { return }
+        // Frozen-solid zombies are dynamic physics bodies now (see freezeSolid) — gravity and
+        // collisions drive position, not the manual walk-cycle code below.
+        if state == .impact || state == .attacking || state == .frozen { return }
         if state == .recovering {
             recoveryTime -= deltaTime
             if recoveryTime <= 0 {
@@ -520,8 +529,8 @@ final class ZombieNode: SKNode {
         rig.zRotation = min(0.65, max(-0.65, rotation))
     }
 
-    func damageAt(_ scenePoint: CGPoint, amount: CGFloat) -> Bool {
-        guard let parent else { return damage(amount) }
+    func damageAt(_ scenePoint: CGPoint, amount: CGFloat, canOverkill: Bool = false) -> Bool {
+        guard let parent else { return damage(amount, canOverkill: canOverkill) }
         let local = convert(scenePoint, from: parent)
         let preferredPart: RigPart = if local.y > kind.size.height * 0.28 {
             .head
@@ -530,7 +539,7 @@ final class ZombieNode: SKNode {
         } else {
             local.x >= 0 ? .frontArm : .backArm
         }
-        return applyDamage(amount * (local.y > kind.size.height * 0.23 ? 1.75 : 1), canOverkill: false, preferredPart: preferredPart)
+        return applyDamage(amount * (local.y > kind.size.height * 0.23 ? 1.75 : 1), canOverkill: canOverkill, preferredPart: preferredPart)
     }
 
     func release(with velocity: CGVector, powerMultiplier: CGFloat) {
@@ -968,6 +977,46 @@ final class ZombieNode: SKNode {
                 self?.sprites.values.forEach { $0.colorBlendFactor = 0 }
             }
         ]), withKey: "slow")
+    }
+
+    /// Flash Freezer: turns the zombie into a real dynamic physics body for the duration instead
+    /// of the walk-speed-only slow `slow(for:)` applies — it can be knocked around, falls under
+    /// gravity, and (via `frozenImpactDamageMultiplier`) shatters for much higher damage on its
+    /// next impact.
+    func freezeSolid(for duration: TimeInterval, reducedMotion: Bool) {
+        guard !isDefeated, !isGrabbed, !isThrown, state != .attacking else { return }
+        isFrozenSolid = true
+        state = .frozen
+        physicsBody?.isDynamic = true
+        physicsBody?.affectedByGravity = true
+        physicsBody?.velocity = .zero
+        physicsBody?.angularVelocity = 0
+        for sprite in sprites.values {
+            sprite.color = .cyan
+            sprite.colorBlendFactor = 0.28
+        }
+        showFrozenOverlay(reducedMotion: reducedMotion)
+        run(.sequence([
+            .wait(forDuration: duration),
+            .run { [weak self] in self?.thawFromSolid() }
+        ]), withKey: "frozenSolid")
+    }
+
+    /// Only resets physics/state if the zombie is still passively `.frozen` — if it's been
+    /// grabbed, thrown, or is mid-recovery from a landing since freezing, that logic already owns
+    /// `physicsBody`/`state` and resetting them here would fight it.
+    private func thawFromSolid() {
+        guard isFrozenSolid else { return }
+        isFrozenSolid = false
+        sprites.values.forEach { $0.colorBlendFactor = 0 }
+        playThaw()
+        guard !isDefeated, !isGrabbed, !isThrown, state == .frozen else { return }
+        state = .recovering
+        recoveryTime = 0.18
+        physicsBody?.isDynamic = false
+        physicsBody?.affectedByGravity = false
+        physicsBody?.velocity = .zero
+        physicsBody?.angularVelocity = 0
     }
 
     private func showFrozenOverlay(reducedMotion: Bool) {
