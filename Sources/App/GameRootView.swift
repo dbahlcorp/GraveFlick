@@ -605,25 +605,26 @@ private struct GameContainerView: View {
     }
 
     private var actionBar: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 5) {
             if session.level.isSandbox { sandboxControls }
-            Text("WEAPONS").font(.caption2.weight(.black)).foregroundStyle(.white.opacity(0.55))
+            Text("WEAPONS").font(.system(size: 9, weight: .black)).foregroundStyle(.white.opacity(0.55))
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 7) {
+                HStack(spacing: 4) {
                     ForEach(WeaponKind.allCases.filter { (session.level.isSandbox || session.progress.isUnlocked($0)) && (session.level.modifier != .limitedWeapons || $0 == .bowlingBall) }) { weapon in
                         CooldownButton(title: weapon.title, icon: weapon.icon, remaining: session.weaponCooldowns[weapon, default: 0]) { session.use(weapon) }
                     }
                 }
             }
             Spacer()
-            Text("TRAPS").font(.caption2.weight(.black)).foregroundStyle(.white.opacity(0.55))
+            Text("TRAPS").font(.system(size: 9, weight: .black)).foregroundStyle(.white.opacity(0.55))
             ForEach(TrapKind.allCases.filter { session.progress.isUnlocked($0) }) { trap in
                 CooldownButton(title: trap.title, icon: trap.icon, remaining: session.trapCooldowns[trap, default: 0]) { session.use(trap) }
             }
         }
-        .padding(7)
-        .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 18))
-        .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.orange.opacity(0.38)))
+        .padding(.horizontal, 5)
+        .padding(.vertical, 4)
+        .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.orange.opacity(0.38)))
     }
 
     private var sandboxControls: some View {
@@ -649,8 +650,8 @@ private struct GameContainerView: View {
             Divider()
             Button("CLEAR LOT", role: .destructive) { session.scene.sandboxClear() }
         } label: {
-            Text("SPAWN").font(.caption.weight(.black)).frame(minWidth: 58, minHeight: 36)
-        }.hudButton(active: true)
+            Text("SPAWN").font(.system(size: 9, weight: .black)).frame(minWidth: 48, minHeight: 30)
+        }.hudButton(active: true, compact: true)
     }
 
     /// A pop animation + audible ping fires exactly once when `remaining` crosses from cooling
@@ -664,31 +665,31 @@ private struct GameContainerView: View {
 
         var body: some View {
             Button(action: action) {
-                VStack(spacing: 2) {
+                VStack(spacing: 1) {
                     Image(icon)
                         .resizable()
                         .scaledToFit()
-                        .frame(width: 28, height: 25)
+                        .frame(width: 21, height: 18)
                     Text(remaining > 0 ? "\(Int(ceil(remaining)))" : title.uppercased())
-                        .font(.system(size: 8, weight: .black))
+                        .font(.system(size: 7, weight: .black))
                         .lineLimit(1)
                 }
-                .frame(minWidth: 62, minHeight: 46)
+                .frame(minWidth: 50, minHeight: 32)
                 .overlay(alignment: .bottom) {
                     if remaining > 0 {
                         GeometryReader { proxy in
                             Rectangle()
                                 .fill(Color.cyan.opacity(0.8))
-                                .frame(width: proxy.size.width * min(1, remaining / 10), height: 3)
+                                .frame(width: proxy.size.width * min(1, remaining / 10), height: 2)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
-                        .frame(height: 3)
+                        .frame(height: 2)
                     }
                 }
             }
-            .hudButton(active: remaining <= 0)
+            .hudButton(active: remaining <= 0, compact: true)
             .disabled(remaining > 0)
-            .scaleEffect(poppedReady ? 1.16 : 1)
+            .scaleEffect(poppedReady ? 1.10 : 1)
             .animation(.spring(response: 0.25, dampingFraction: 0.45), value: poppedReady)
             .accessibilityLabel("\(title), \(remaining > 0 ? "ready in \(Int(ceil(remaining))) seconds" : "ready")")
             .onChange(of: remaining) { oldValue, newValue in
@@ -931,13 +932,13 @@ private extension View {
             .shadow(color: .black.opacity(0.5), radius: 14, y: 7)
     }
 
-    func hudButton(active: Bool = true) -> some View {
+    func hudButton(active: Bool = true, compact: Bool = false) -> some View {
         self
             .foregroundStyle(active ? Color.white : Color.white.opacity(0.46))
-            .padding(.horizontal, 13)
-            .frame(minHeight: 42)
-            .background(active ? Color.orange.opacity(0.72) : Color.black.opacity(0.62), in: RoundedRectangle(cornerRadius: 13))
-            .overlay(RoundedRectangle(cornerRadius: 13).stroke(.white.opacity(0.18)))
+            .padding(.horizontal, compact ? 6 : 13)
+            .frame(minHeight: compact ? 36 : 42)
+            .background(active ? Color.orange.opacity(0.72) : Color.black.opacity(0.62), in: RoundedRectangle(cornerRadius: compact ? 10 : 13))
+            .overlay(RoundedRectangle(cornerRadius: compact ? 10 : 13).stroke(.white.opacity(0.18)))
             .buttonStyle(.plain)
     }
 }
