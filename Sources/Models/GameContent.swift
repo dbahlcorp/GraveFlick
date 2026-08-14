@@ -16,6 +16,27 @@ enum WeaponKind: String, CaseIterable, Codable, Identifiable {
     case meteor
 
     var id: String { rawValue }
+    static let starterLoadout: Set<WeaponKind> = [.bowlingBall, .shotgun, .anvil]
+
+    var campaignUnlockLevel: Int {
+        switch self {
+        case .bowlingBall, .shotgun, .anvil: 1
+        case .grenade: 2
+        case .propaneTank: 3
+        case .airstrike: 4
+        case .sniper: 5
+        case .greaseFire: 7
+        case .transformer: 10
+        case .wreckingBall: 12
+        case .deliveryTruck: 15
+        case .meteor: 20
+        }
+    }
+
+    static func campaignLoadout(through level: Int) -> Set<String> {
+        Set(allCases.filter { $0.campaignUnlockLevel <= max(1, level) }.map(\.rawValue))
+    }
+
     var title: String {
         switch self {
         case .bowlingBall: "Bowling Ball"
@@ -85,26 +106,6 @@ enum WeaponKind: String, CaseIterable, Codable, Identifiable {
 enum GameDifficulty: String, CaseIterable, Codable, Identifiable {
     case casual, standard, nightmare
     var id: String { rawValue }
-    static let starterLoadout: Set<WeaponKind> = [.bowlingBall, .shotgun, .anvil]
-
-    var campaignUnlockLevel: Int {
-        switch self {
-        case .bowlingBall, .shotgun, .anvil: 1
-        case .grenade: 2
-        case .propaneTank: 3
-        case .airstrike: 4
-        case .sniper: 5
-        case .greaseFire: 7
-        case .transformer: 10
-        case .wreckingBall: 12
-        case .deliveryTruck: 15
-        case .meteor: 20
-        }
-    }
-
-    static func campaignLoadout(through level: Int) -> Set<String> {
-        Set(allCases.filter { $0.campaignUnlockLevel <= max(1, level) }.map(\.rawValue))
-    }
     var title: String { rawValue.uppercased() }
     var enemySpeed: CGFloat { self == .casual ? 0.82 : (self == .nightmare ? 1.24 : 1) }
     var enemyHealth: CGFloat { self == .casual ? 0.78 : (self == .nightmare ? 1.38 : 1) }
