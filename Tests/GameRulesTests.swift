@@ -146,6 +146,36 @@ final class GameRulesTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(boss.bossPhase, 2)
     }
 
+    func testRegularZombiesSurviveTheirFirstOrdinaryHitAndExposeHealth() {
+        let walker = ZombieNode(kind: .walker, approachesFromLeft: true)
+        XCTAssertFalse(walker.damage(100))
+        XCTAssertGreaterThan(walker.healthFraction, 0)
+        XCTAssertLessThan(walker.healthFraction, 1)
+
+        walker.updateWalking(deltaTime: 0.2, reducedMotion: true)
+        XCTAssertTrue(walker.damage(100))
+        XCTAssertEqual(walker.healthFraction, 0)
+    }
+
+    func testHeavyExplosionCanStillOverkillARegularZombie() {
+        let walker = ZombieNode(kind: .walker, approachesFromLeft: true)
+        XCTAssertTrue(walker.damage(100, canOverkill: true))
+    }
+
+    func testDamagedZombieCanLoseALimbAndKeepFighting() {
+        let brute = ZombieNode(kind: .brute, approachesFromLeft: true)
+        XCTAssertFalse(brute.damage(100))
+        XCTAssertGreaterThanOrEqual(brute.severedLimbCount, 1)
+        XCTAssertFalse(brute.isDefeated)
+        XCTAssertGreaterThan(brute.healthFraction, 0)
+    }
+
+    func testGoreSettingDisablesLiveDismemberment() {
+        let brute = ZombieNode(kind: .brute, approachesFromLeft: true, dismembermentEnabled: false)
+        XCTAssertFalse(brute.damage(100))
+        XCTAssertEqual(brute.severedLimbCount, 0)
+    }
+
     func testSurvivalDifficultyKeepsScalingAndAddsBossPressure() {
         let waveOne = GameRules.survivalDifficulty(wave: 1)
         let waveTen = GameRules.survivalDifficulty(wave: 10)

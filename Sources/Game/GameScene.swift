@@ -85,8 +85,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var rapidGearLevel: Int { progress.upgradeLevel(.rapidGear) }
     private var groundY: CGFloat { max(70, size.height * 0.13) }
     private var houseFrame: CGRect {
-        let width = min(260, size.width * 0.24)
-        return CGRect(x: size.width * 0.5 - width * 0.5, y: groundY, width: width, height: min(250, size.height * 0.34))
+        let width = min(310, size.width * 0.29)
+        return CGRect(x: size.width * 0.5 - width * 0.5, y: groundY, width: width, height: min(280, size.height * 0.38))
     }
 
     init(level: GameLevel, progress: PlayerProgress, settings: GameSettings, size: CGSize) {
@@ -362,14 +362,22 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
             playCombatVFX(.zombieSplatter, at: contact.contactPoint, size: 92, direction: zombie.approachesFromLeft ? -1 : 1)
             let baseDamage: CGFloat = zombie.kind == .brute ? 1.8 : 4
-            if zombie.damageAt(contact.contactPoint, amount: baseDamage * zombie.kind.weaponDamageMultiplier) { defeat(zombie, reason: .weapon) }
+            if zombie.damageAt(contact.contactPoint, amount: baseDamage * zombie.kind.weaponDamageMultiplier) {
+                defeat(zombie, reason: .weapon)
+            } else {
+                SoundManager.shared.playZombieVoice(for: zombie.kind, moment: .hurt, pan: audioPan(for: zombie))
+            }
             return
         }
 
         if let zombie = zombieBody(in: bodies), bodies.contains(where: { $0.categoryBitMask == PhysicsCategory.trap }) {
             playCombatVFX(.zombieSplatter, at: contact.contactPoint, size: 76, direction: zombie.approachesFromLeft ? -1 : 1)
             let baseDamage: CGFloat = zombie.kind == .armored ? 0.7 : 1.5
-            if zombie.damage(baseDamage * zombie.kind.trapDamageMultiplier) { defeat(zombie, reason: .trap) }
+            if zombie.damage(baseDamage * zombie.kind.trapDamageMultiplier) {
+                defeat(zombie, reason: .trap)
+            } else {
+                SoundManager.shared.playZombieVoice(for: zombie.kind, moment: .hurt, pan: audioPan(for: zombie))
+            }
             return
         }
 
@@ -556,7 +564,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             kind: kind,
             approachesFromLeft: fromLeft,
             movementMultiplier: (difficulty?.speedMultiplier ?? 1) * settings.difficulty.enemySpeed * (level.isSandbox ? sandboxSpeed : 1),
-            healthMultiplier: (difficulty?.healthMultiplier ?? 1) * settings.difficulty.enemyHealth
+            healthMultiplier: (difficulty?.healthMultiplier ?? 1) * settings.difficulty.enemyHealth,
+            dismembermentEnabled: settings.goreEnabled
         )
         zombie.position = CGPoint(
             x: fromLeft ? -kind.size.width : size.width + kind.size.width,
@@ -801,7 +810,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func throwExplosive(radius: CGFloat, damage: CGFloat, color: SKColor) {
         let point = CGPoint(x: size.width / 2, y: groundY + 42)
         for zombie in activeZombies where !zombie.isDefeated && abs(zombie.position.x - point.x) < radius {
-            if zombie.damage(damage * zombie.kind.weaponDamageMultiplier) { defeat(zombie, reason: .explosion) }
+            if zombie.damage(damage * zombie.kind.weaponDamageMultiplier, canOverkill: true) { defeat(zombie, reason: .explosion) }
             else { zombie.launch(with: CGVector(dx: (zombie.position.x < point.x ? -1 : 1) * 260, dy: 300)) }
         }
         playCombatVFX(.explosion, at: point, size: radius * 1.7, direction: 1, tint: color)
@@ -830,7 +839,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func throwExplosive(at point: CGPoint, radius: CGFloat, damage: CGFloat) {
         for zombie in activeZombies where !zombie.isDefeated && hypot(zombie.position.x - point.x, zombie.position.y - point.y) < radius {
-            if zombie.damage(damage * zombie.kind.weaponDamageMultiplier) { defeat(zombie, reason: .explosion) }
+            if zombie.damage(damage * zombie.kind.weaponDamageMultiplier, canOverkill: true) { defeat(zombie, reason: .explosion) }
         }
         playCombatVFX(.explosion, at: point, size: radius * 1.7, direction: 1)
         SoundManager.shared.play(.explosion)

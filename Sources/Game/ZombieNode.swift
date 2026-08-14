@@ -61,17 +61,29 @@ enum ZombieKind: String, CaseIterable, Codable {
 
     var hitPoints: CGFloat {
         switch self {
-        case .walker: 1
-        case .runner: 0.8
-        case .brute: 3.2
-        case .crawler: 1.25
-        case .armored: 2.8
-        case .volatile: 1.8
-        case .waitress: 1.15
-        case .riot: 3.6
-        case .groundskeeper: 2.1
-        case .butcher: 14
-        case .colossus: 20
+        case .walker: 5
+        case .runner: 4
+        case .brute: 12
+        case .crawler: 5.5
+        case .armored: 11
+        case .volatile: 7
+        case .waitress: 4.5
+        case .riot: 14
+        case .groundskeeper: 9
+        case .butcher: 44
+        case .colossus: 68
+        }
+    }
+
+    /// Regular enemies survive their first ordinary hit so combat reads as damage, stagger, then
+    /// defeat instead of every contact deleting a full-health zombie. Heavy scripted explosions
+    /// can opt out; bosses already rely on their larger health pools and phase thresholds.
+    var firstHitHealthFloor: CGFloat {
+        switch self {
+        case .runner, .waitress: 0.28
+        case .walker, .crawler, .volatile: 0.38
+        case .brute, .armored, .riot, .groundskeeper: 0.48
+        case .butcher, .colossus: 0
         }
     }
 
@@ -144,7 +156,7 @@ enum ZombieKind: String, CaseIterable, Codable {
     var alwaysVocalizesOnDefeat: Bool { self == .brute || self == .volatile }
 }
 
-private enum RigPart: CaseIterable {
+private enum RigPart: CaseIterable, Hashable {
     case head
     case torso
     case frontArm
@@ -194,16 +206,22 @@ final class ZombieNode: SKNode {
     private(set) var health: CGFloat
     private let maximumHealth: CGFloat
     private let movementMultiplier: CGFloat
+    private let dismembermentEnabled: Bool
 
     private let rig = SKNode()
     private let shadowNode: SKShapeNode
-    private let healthBar = SKShapeNode(rectOf: CGSize(width: 44, height: 5), cornerRadius: 2.5)
+    private let healthBarTrack = SKShapeNode(rectOf: CGSize(width: 48, height: 7), cornerRadius: 3.5)
+    private let healthBarFill = SKSpriteNode(color: SKColor(red: 0.34, green: 0.90, blue: 0.32, alpha: 1), size: CGSize(width: 44, height: 4))
     private var sprites: [RigPart: SKSpriteNode] = [:]
     private var restPose: [RigPart: PartPose] = [:]
     private var walkPhase: CGFloat = 0
     private var slowTime: TimeInterval = 0
     private var recoveryTime: TimeInterval = 0
     private var hitReactionTime: TimeInterval = 0
+    private var damageProtectionRemaining: TimeInterval = 0
+    private var hasTakenOrdinaryHit = false
+    private(set) var severedLimbCount = 0
+    private var severedParts: Set<RigPart> = []
     private var armorBroken = false
     private var volatileWarningActive = false
     private var freezeOverlay: SKNode?
@@ -227,10 +245,11 @@ final class ZombieNode: SKNode {
         }
     }
 
-    init(kind: ZombieKind, approachesFromLeft: Bool, movementMultiplier: CGFloat = 1, healthMultiplier: CGFloat = 1) {
+    init(kind: ZombieKind, approachesFromLeft: Bool, movementMultiplier: CGFloat = 1, healthMultiplier: CGFloat = 1, dismembermentEnabled: Bool = true) {
         self.kind = kind
         self.approachesFromLeft = approachesFromLeft
         self.movementMultiplier = movementMultiplier
+        self.dismembermentEnabled = dismembermentEnabled
         maximumHealth = kind.hitPoints * healthMultiplier
         health = maximumHealth
 
@@ -246,13 +265,17 @@ final class ZombieNode: SKNode {
         addChild(rig)
         buildRig()
 
-        healthBar.fillColor = SKColor(red: 0.92, green: 0.24, blue: 0.18, alpha: 1)
-        healthBar.strokeColor = .black.withAlphaComponent(0.55)
-        healthBar.lineWidth = 1.5
-        healthBar.position.y = kind.size.height * 0.56
-        healthBar.isHidden = true
-        healthBar.zPosition = 12
-        addChild(healthBar)
+        healthBarTrack.fillColor = .black.withAlphaComponent(0.72)
+        healthBarTrack.strokeColor = .white.withAlphaComponent(0.48)
+        healthBarTrack.lineWidth = 1
+        healthBarTrack.position.y = kind.size.height * 0.56
+        healthBarTrack.isHidden = true
+        healthBarTrack.zPosition = 12
+        addChild(healthBarTrack)
+        healthBarFill.anchorPoint = CGPoint(x: 0, y: 0.5)
+        healthBarFill.position = CGPoint(x: -22, y: 0)
+        healthBarFill.zPosition = 1
+        healthBarTrack.addChild(healthBarFill)
 
         let physicsSize = CGSize(width: kind.size.width * 0.68, height: kind.size.height * 0.78)
         physicsBody = SKPhysicsBody(rectangleOf: physicsSize, center: CGPoint(x: 0, y: -kind.size.height * 0.04))
@@ -368,6 +391,7 @@ final class ZombieNode: SKNode {
     func updateWalking(deltaTime: TimeInterval, reducedMotion: Bool) {
         if slowTime > 0 { slowTime -= deltaTime }
         if hitReactionTime > 0 { hitReactionTime -= deltaTime }
+        if damageProtectionRemaining > 0 { damageProtectionRemaining -= deltaTime }
         guard !isDefeated else { return }
         abilityTime += deltaTime
         if kind == .waitress, abilityTime >= 2.4, state == .walking {
@@ -499,7 +523,14 @@ final class ZombieNode: SKNode {
     func damageAt(_ scenePoint: CGPoint, amount: CGFloat) -> Bool {
         guard let parent else { return damage(amount) }
         let local = convert(scenePoint, from: parent)
-        return damage(amount * (local.y > kind.size.height * 0.23 ? 1.75 : 1))
+        let preferredPart: RigPart = if local.y > kind.size.height * 0.28 {
+            .head
+        } else if local.y < -kind.size.height * 0.12 {
+            local.x >= 0 ? .frontLeg : .backLeg
+        } else {
+            local.x >= 0 ? .frontArm : .backArm
+        }
+        return applyDamage(amount * (local.y > kind.size.height * 0.23 ? 1.75 : 1), canOverkill: false, preferredPart: preferredPart)
     }
 
     func release(with velocity: CGVector, powerMultiplier: CGFloat) {
@@ -668,9 +699,25 @@ final class ZombieNode: SKNode {
     }
 
     @discardableResult
-    func damage(_ amount: CGFloat) -> Bool {
+    func damage(_ amount: CGFloat, canOverkill: Bool = false) -> Bool {
+        applyDamage(amount, canOverkill: canOverkill, preferredPart: nil)
+    }
+
+    @discardableResult
+    private func applyDamage(_ amount: CGFloat, canOverkill: Bool, preferredPart: RigPart?) -> Bool {
         guard !isDefeated else { return true }
-        health -= amount
+        guard damageProtectionRemaining <= 0 else { return false }
+
+        let appliedDamage: CGFloat
+        if !canOverkill, !kind.isBoss, !hasTakenOrdinaryHit {
+            let healthFloor = maximumHealth * kind.firstHitHealthFloor
+            appliedDamage = min(amount, max(0, health - healthFloor))
+            hasTakenOrdinaryHit = true
+        } else {
+            appliedDamage = amount
+        }
+        health -= appliedDamage
+        damageProtectionRemaining = canOverkill ? 0.04 : 0.11
         if kind.isBoss {
             let fraction = max(0, health / maximumHealth)
             let nextPhase = fraction <= 0.33 ? 3 : (fraction <= 0.66 ? 2 : 1)
@@ -683,7 +730,7 @@ final class ZombieNode: SKNode {
             }
         }
         if kind.isBoss, !bossIsStunned {
-            bossStunDamage += amount
+            bossStunDamage += appliedDamage
             if bossStunDamage >= maximumHealth * 0.12 {
                 bossIsStunned = true
                 bossStunDamage = 0
@@ -699,8 +746,11 @@ final class ZombieNode: SKNode {
             }
         }
         onHealthChanged?(healthFraction)
-        healthBar.isHidden = false
-        healthBar.xScale = max(0.05, health / maximumHealth)
+        healthBarTrack.isHidden = false
+        healthBarFill.xScale = max(0.02, healthFraction)
+        healthBarFill.color = healthFraction > 0.62
+            ? SKColor(red: 0.34, green: 0.90, blue: 0.32, alpha: 1)
+            : (healthFraction > 0.30 ? .yellow : SKColor(red: 0.94, green: 0.18, blue: 0.12, alpha: 1))
         hitReactionTime = 0.16
         for sprite in sprites.values {
             sprite.run(.sequence([
@@ -724,7 +774,68 @@ final class ZombieNode: SKNode {
             volatileWarningActive = true
             playVolatileWarning()
         }
+        if health > 0, !kind.isBoss {
+            maybeSeverLimb(preferred: preferredPart, impactDamage: appliedDamage)
+        }
         return health <= 0
+    }
+
+    private func maybeSeverLimb(preferred: RigPart?, impactDamage: CGFloat) {
+        guard dismembermentEnabled else { return }
+        let targetSeverCount = healthFraction <= 0.30 ? 2 : (healthFraction <= 0.68 ? 1 : 0)
+        let targetedHeavyHit = preferred != nil && healthFraction <= 0.74 && impactDamage >= maximumHealth * 0.22
+        guard severedLimbCount < targetSeverCount || targetedHeavyHit else { return }
+
+        let ordinaryLimbs: [RigPart] = [.frontArm, .backArm, .frontLeg, .backLeg]
+        let preferredIsAllowed = preferred != .head || healthFraction <= 0.42
+        let candidate = if let preferred, preferredIsAllowed, !severedParts.contains(preferred) {
+            preferred
+        } else {
+            ordinaryLimbs.first { !severedParts.contains($0) }
+        }
+        guard let candidate else { return }
+        sever(candidate)
+    }
+
+    private func sever(_ part: RigPart) {
+        guard part != .torso,
+              !severedParts.contains(part),
+              let sprite = sprites[part],
+              let texture = sprite.texture,
+              let parent else { return }
+
+        let localPoint = convert(sprite.position, from: rig)
+        let debris = SKSpriteNode(texture: texture, size: sprite.size)
+        debris.position = parent.convert(localPoint, from: self)
+        debris.zPosition = zPosition + 12
+        debris.zRotation = zRotation + rig.zRotation + sprite.zRotation
+        debris.xScale = xScale
+        debris.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: max(8, sprite.size.width * 0.62), height: max(8, sprite.size.height * 0.62)))
+        debris.physicsBody?.mass = part == .head ? 0.46 : 0.34
+        debris.physicsBody?.restitution = 0.38
+        debris.physicsBody?.friction = 0.82
+        debris.physicsBody?.categoryBitMask = PhysicsCategory.none
+        debris.physicsBody?.collisionBitMask = PhysicsCategory.ground | PhysicsCategory.boundary
+        parent.addChild(debris)
+
+        let direction: CGFloat = approachesFromLeft ? -1 : 1
+        debris.physicsBody?.applyImpulse(CGVector(dx: direction * CGFloat.random(in: 42...92), dy: CGFloat.random(in: 78...142)))
+        debris.physicsBody?.angularVelocity = CGFloat.random(in: -6...6)
+        debris.run(.sequence([.wait(forDuration: 2.2), .fadeOut(withDuration: 0.55), .removeFromParent()]))
+
+        sprite.removeFromParent()
+        sprites[part] = nil
+        severedParts.insert(part)
+        severedLimbCount += 1
+
+        let wound = SKShapeNode(circleOfRadius: part == .head ? 6 : 4)
+        wound.fillColor = SKColor(red: 0.42, green: 0.03, blue: 0.02, alpha: 0.92)
+        wound.strokeColor = SKColor(red: 0.80, green: 0.12, blue: 0.05, alpha: 0.72)
+        wound.lineWidth = 1
+        wound.position = localPoint
+        wound.zPosition = 5
+        addChild(wound)
+        wound.run(.sequence([.fadeAlpha(to: 0.58, duration: 0.22), .wait(forDuration: 1.1), .fadeOut(withDuration: 0.45), .removeFromParent()]))
     }
 
     /// Reapplies the current bossPhase's enrage tint (or clears it in phase 1). Called both on a
@@ -774,7 +885,7 @@ final class ZombieNode: SKNode {
         physicsBody?.collisionBitMask = PhysicsCategory.none
         physicsBody?.contactTestBitMask = PhysicsCategory.none
         physicsBody?.isDynamic = false
-        healthBar.isHidden = true
+        healthBarTrack.isHidden = true
         shadowNode.run(.fadeOut(withDuration: 0.22))
 
         let duration: TimeInterval = reducedMotion ? 0.28 : 0.62
