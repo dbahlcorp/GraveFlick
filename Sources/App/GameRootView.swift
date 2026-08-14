@@ -153,66 +153,93 @@ private struct MainMenuView: View {
         store = model.store
     }
 
+    private var continueLevel: GameLevel {
+        GameLevel.campaign[max(0, min(GameLevel.campaign.count - 1, store.progress.highestUnlockedLevel - 1))]
+    }
+
     var body: some View {
-        NightBackground {
+        ZStack {
+            Image("menu_key_art")
+                .resizable()
+                .scaledToFill()
+                .ignoresSafeArea()
+            LinearGradient(
+                colors: [.clear, Color(red: 0.015, green: 0.02, blue: 0.045).opacity(0.38), .black.opacity(0.88)],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .ignoresSafeArea()
+            LinearGradient(colors: [.black.opacity(0.14), .clear, .black.opacity(0.52)], startPoint: .top, endPoint: .bottom)
+                .ignoresSafeArea()
+
             GeometryReader { geometry in
-                HStack(spacing: 38) {
-                    VStack(spacing: 6) {
+                HStack(spacing: 24) {
+                    VStack(alignment: .leading, spacing: 8) {
                         Image("ui_graveflick_logo")
                             .resizable()
                             .scaledToFit()
-                            .frame(width: min(geometry.size.width * 0.49, 610), height: geometry.size.height * 0.38)
+                            .frame(maxWidth: min(geometry.size.width * 0.42, 560), maxHeight: geometry.size.height * 0.30)
                             .accessibilityLabel("GraveFlick, Last Light Diner")
                             .opacity(neonPulse ? 1 : 0.82)
                             .shadow(color: .red.opacity(neonPulse ? 0.48 : 0.16), radius: neonPulse ? 18 : 6)
-                        Image("diner_complete")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: min(geometry.size.width * 0.43, 520), height: geometry.size.height * 0.32)
-                            .shadow(color: .orange.opacity(0.34), radius: 20)
+                        Text("DEFEND THE LAST LIGHT")
+                            .font(.system(size: 11, weight: .black, design: .rounded))
+                            .tracking(2.4)
+                            .foregroundStyle(.white.opacity(0.78))
+                            .shadow(color: .black, radius: 4)
+                        Spacer()
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
-                    VStack(spacing: 7) {
+                    VStack(spacing: 8) {
                         Text("THE LAST LIGHT DINER NEVER CLOSES QUIETLY")
-                            .font(.caption.weight(.black))
-                            .tracking(1.8)
+                            .font(.system(size: 10, weight: .black))
+                            .tracking(1.5)
                             .foregroundStyle(.white.opacity(0.72))
                             .multilineTextAlignment(.center)
-                        MenuButton(title: "PLAY", icon: "ui_play", color: .orange) {
-                            model.start(GameLevel.campaign[max(0, min(GameLevel.campaign.count - 1, store.progress.highestUnlockedLevel - 1))])
+
+                        MenuButton(title: store.progress.highestUnlockedLevel > 1 ? "CONTINUE" : "PLAY", subtitle: "NIGHT \(continueLevel.id) · \(continueLevel.title.uppercased())", icon: "ui_play", color: .orange) {
+                            model.start(continueLevel)
                         }
-                        MenuButton(title: "LEVELS", icon: "ui_levels", color: .cyan) { model.screen = .levels }
-                        MenuButton(title: "SURVIVAL", icon: "ui_survival", color: .red) { model.start(GameLevel.endless) }
-                        MenuButton(title: "CHALLENGES", icon: "ui_star", color: .yellow) { model.screen = .challenges }
-                        MenuButton(title: "SANDBOX", icon: "ui_grave_time", color: .green) { model.startSandbox() }
-                        MenuButton(title: "UPGRADES", icon: "ui_upgrades", color: .purple) { model.screen = .upgrades }
-                        MenuButton(title: "SETTINGS", icon: "ui_settings", color: .gray) { model.screen = .settings }
-                        MenuButton(title: "CREDITS", icon: "ui_info", color: .indigo) { model.screen = .credits }
+
+                        HStack(spacing: 8) {
+                            MenuTile(title: "LEVELS", subtitle: "CAMPAIGN", icon: "ui_levels", color: .cyan) { model.screen = .levels }
+                            MenuTile(title: "SURVIVAL", subtitle: "ENDLESS", icon: "ui_survival", color: .red) { model.start(GameLevel.endless) }
+                        }
+                        HStack(spacing: 8) {
+                            MenuTile(title: "CHALLENGES", subtitle: "SPECIAL RULES", icon: "ui_star", color: .yellow) { model.screen = .challenges }
+                            MenuTile(title: "SANDBOX", subtitle: "FREE PLAY", icon: "ui_grave_time", color: .green) { model.startSandbox() }
+                        }
+
+                        HStack(spacing: 7) {
+                            UtilityMenuButton(title: "UPGRADES", icon: "ui_upgrades", color: .purple) { model.screen = .upgrades }
+                            UtilityMenuButton(title: "SETTINGS", icon: "ui_settings", color: .gray) { model.screen = .settings }
+                            UtilityMenuButton(title: "CREDITS", icon: "ui_info", color: .indigo) { model.screen = .credits }
+                        }
+
                         HStack(spacing: 8) {
                             Image("ui_currency_coin").resizable().scaledToFit().frame(width: 20, height: 20)
                             Text("\(store.progress.currency) NIGHT COINS")
+                            Spacer(minLength: 8)
+                            Text(store.dailySummary)
+                                .foregroundStyle(store.progress.dailyClaimed ? .green : .cyan)
                         }
-                        .font(.caption.weight(.black))
+                        .font(.system(size: 9, weight: .black))
                         .foregroundStyle(.white.opacity(0.82))
-                        Text(store.dailySummary)
-                            .font(.caption2.weight(.black))
-                            .foregroundStyle(store.progress.dailyClaimed ? .green : .cyan)
-                        if let bestSurvival = store.progress.highScores[GameLevel.endless.id] {
-                            Text("BEST SURVIVAL SCORE \(bestSurvival)")
-                                .font(.caption2.weight(.black))
-                                .foregroundStyle(.red.opacity(0.85))
-                        }
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.72)
                     }
-                    .frame(maxWidth: 390)
-                    .roadsidePanel(padding: 10)
+                    .frame(width: min(max(330, geometry.size.width * 0.46), 460))
+                    .roadsidePanel(padding: 12)
                     .offset(x: entered ? 0 : 34)
                     .opacity(entered ? 1 : 0)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .padding(.horizontal, 30)
-            .padding(.vertical, 18)
+            .padding(.horizontal, 22)
+            .padding(.vertical, 14)
         }
+        .foregroundStyle(.white)
         .onAppear {
             guard !store.settings.reducedMotion else { entered = true; neonPulse = true; return }
             withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) { entered = true }
@@ -839,23 +866,75 @@ private struct ScreenHeader: View {
 
 private struct MenuButton: View {
     let title: String
+    let subtitle: String
     let icon: String
     let color: Color
     let action: () -> Void
     var body: some View {
         Button(action: action) {
             HStack {
-                Image(icon).resizable().scaledToFit().frame(width: 30, height: 30)
-                Text(title).font(.headline.weight(.black)).tracking(1.5)
+                Image(icon).resizable().scaledToFit().frame(width: 34, height: 34)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(title).font(.headline.weight(.black)).tracking(1.5)
+                    Text(subtitle).font(.system(size: 8, weight: .bold)).tracking(0.8).foregroundStyle(.white.opacity(0.62))
+                }
                 Spacer()
                 Image(systemName: "chevron.right")
             }
             .foregroundStyle(.white)
-            .padding(.horizontal, 20)
-            .frame(height: 48)
+            .padding(.horizontal, 16)
+            .frame(height: 56)
             .background(LinearGradient(colors: [color.opacity(0.44), Color.black.opacity(0.68)], startPoint: .top, endPoint: .bottom), in: RoundedRectangle(cornerRadius: 14))
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(color.opacity(0.88), lineWidth: 1.5))
             .shadow(color: color.opacity(0.2), radius: 7)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct MenuTile: View {
+    let title: String
+    let subtitle: String
+    let icon: String
+    let color: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                Image(icon).resizable().scaledToFit().frame(width: 28, height: 28)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title).font(.system(size: 12, weight: .black)).tracking(0.8)
+                    Text(subtitle).font(.system(size: 7, weight: .bold)).tracking(0.6).foregroundStyle(.white.opacity(0.55))
+                }
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, minHeight: 55)
+            .background(LinearGradient(colors: [color.opacity(0.30), .black.opacity(0.72)], startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(color.opacity(0.68)))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct UtilityMenuButton: View {
+    let title: String
+    let icon: String
+    let color: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(icon).resizable().scaledToFit().frame(width: 17, height: 17)
+                Text(title).font(.system(size: 8, weight: .black)).lineLimit(1).minimumScaleFactor(0.7)
+            }
+            .foregroundStyle(.white.opacity(0.9))
+            .frame(maxWidth: .infinity, minHeight: 38)
+            .background(Color.black.opacity(0.50), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(color.opacity(0.56)))
         }
         .buttonStyle(.plain)
     }
