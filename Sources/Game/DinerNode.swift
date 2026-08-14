@@ -23,6 +23,7 @@ final class DinerNode: SKNode {
     }
     var hasVisibleDefender: Bool { defender.hasAuthoredTexture && defender.alpha > 0.1 }
     var defenderWeaponTier: Int { defender.weaponTier }
+    var defenderAnimationState: DinerDefenderAnimationState { defender.currentAnimationState }
 
     init(frame: CGRect, reducedMotion: Bool, highContrast: Bool) {
         self.reducedMotion = reducedMotion

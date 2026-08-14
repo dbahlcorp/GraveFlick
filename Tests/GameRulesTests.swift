@@ -232,6 +232,9 @@ final class GameRulesTests: XCTestCase {
         XCTAssertTrue(diner.hasVisibleDefender)
         diner.configureDefender(weaponTier: 3)
         XCTAssertEqual(diner.defenderWeaponTier, 3)
+        XCTAssertEqual(diner.defenderAnimationState, .idle)
+        diner.fireDefender()
+        XCTAssertEqual(diner.defenderAnimationState, .firing)
     }
 
     func testDinerDamageStagesStopIdleComponentLoops() {
