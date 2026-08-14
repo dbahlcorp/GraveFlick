@@ -550,28 +550,38 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         notifyDelegate()
     }
 
+    private func weaponReadySpot(for kind: WeaponKind) -> CGPoint {
+        switch kind {
+        case .grenade:
+            // Close to the diner — this is a hand-thrown weapon, it should visibly come from
+            // the player's position at the window, not materialize at mid-field.
+            return CGPoint(x: houseFrame.midX + houseFrame.width * 0.1, y: groundY + houseFrame.height * 0.3)
+        default:
+            return CGPoint(x: size.width * 0.5, y: groundY + 40)
+        }
+    }
+
     /// The weapon-prop sprite a `dragRelease` weapon presents at its ready spot when armed —
     /// physics-less until `commitFire` hands it to that weapon's fire function.
     private func makeDragReadyNode(for kind: WeaponKind) -> SKSpriteNode? {
-        let readySpot = CGPoint(x: size.width * 0.5, y: groundY + 40)
         switch kind {
         case .bowlingBall:
             let ball = SKSpriteNode(texture: EquipmentArt.bowlingBall.texture)
             ball.size = EquipmentArt.bowlingBall.fittedSize(inside: CGSize(width: 82, height: 82))
             ball.name = WeaponKind.bowlingBall.rawValue
-            ball.position = readySpot
+            ball.position = weaponReadySpot(for: kind)
             ball.zPosition = 30
             return ball
         case .grenade:
             let grenade = SKSpriteNode(texture: WeaponKind.grenade.authoredTexture, size: CGSize(width: 44, height: 58))
             grenade.name = WeaponKind.grenade.rawValue
-            grenade.position = readySpot
+            grenade.position = weaponReadySpot(for: kind)
             grenade.zPosition = 30
             return grenade
         case .propaneTank:
             let tank = SKSpriteNode(texture: WeaponKind.propaneTank.authoredTexture, size: CGSize(width: 86, height: 58))
             tank.name = WeaponKind.propaneTank.rawValue
-            tank.position = readySpot
+            tank.position = weaponReadySpot(for: kind)
             tank.zPosition = 30
             return tank
         case .wreckingBall:
@@ -1093,14 +1103,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func explodeVolatile(at point: CGPoint) {
+        let radius: CGFloat = 170
         let nearby = activeZombies.filter {
-            !$0.isDefeated && hypot($0.position.x - point.x, $0.position.y - point.y) < 170
+            !$0.isDefeated && hypot($0.position.x - point.x, $0.position.y - point.y) < radius
         }
         for zombie in nearby {
             if zombie.damage(1.6) { defeat(zombie, reason: .explosion) }
             else {
-                let dx = zombie.position.x - point.x
-                zombie.launch(with: CGVector(dx: dx.sign == .minus ? -220 : 220, dy: 280))
+                zombie.launch(with: radialImpulse(from: point, to: zombie.position, radius: radius, maxImpulse: 380, minImpulse: 140))
             }
         }
         playCombatVFX(.explosion, at: point, size: 270, direction: 1)
@@ -1138,19 +1148,28 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     /// Half-angle of the scatterblast cone, in radians (~22°).
     private let scatterblastHalfAngle: CGFloat = 0.38
+    private var scatterblastRange: CGFloat { size.width * 0.62 }
 
+    /// Knockback follows the real direction to each zombie (not a flattened left/right), and both
+    /// damage and impulse taper with distance from the muzzle: a point-blank hit sends a zombie
+    /// flying, a zombie at the edge of the cone's range barely staggers.
     private func fireScatterblast(toward aimPoint: CGPoint) {
         let origin = defenderMuzzle
         let aimAngle = atan2(aimPoint.y - origin.y, aimPoint.x - origin.x)
+        let range = scatterblastRange
         let zombies = activeZombies.filter { !$0.isDefeated }
         for zombie in zombies {
-            let angleToZombie = atan2(zombie.position.y - origin.y, zombie.position.x - origin.x)
+            let dx = zombie.position.x - origin.x
+            let dy = zombie.position.y - origin.y
+            let distance = max(1, hypot(dx, dy))
+            let angleToZombie = atan2(dy, dx)
             guard abs(shortestAngleDelta(from: aimAngle, to: angleToZombie)) <= scatterblastHalfAngle else { continue }
-            let direction: CGFloat = cos(aimAngle) < 0 ? -1 : 1
-            zombie.launch(with: CGVector(dx: direction * 460, dy: 300))
-            // Cone-only hits fewer zombies per cast than the old whole-screen blast, so each hit
-            // lands noticeably harder to keep the weapon worth its cooldown.
-            if zombie.damage(zombie.kind == .brute ? 1.6 : 2.4) { defeat(zombie, reason: .weapon) }
+
+            let proximity = max(0, 1 - distance / range)
+            let damage = (1.0 + proximity * 3.4) * zombie.kind.weaponDamageMultiplier
+            let impulse = radialImpulse(from: origin, to: zombie.position, radius: range, maxImpulse: 760, minImpulse: 210)
+            zombie.launch(with: impulse)
+            if zombie.damage(damage) { defeat(zombie, reason: .weapon) }
         }
         fireBuckshotSpread(from: origin, angle: aimAngle)
         radialFlash(at: origin, color: .yellow)
@@ -1171,7 +1190,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func fireBuckshotSpread(from origin: CGPoint, angle: CGFloat) {
         guard settings.flashesEnabled else { return }
         let pelletCount = 9
-        let range = size.width * 0.62
+        let range = scatterblastRange
         for index in 0..<pelletCount {
             let spread = (CGFloat(index) / CGFloat(pelletCount - 1)) - 0.5
             let pelletAngle = angle + spread * scatterblastHalfAngle * 2
@@ -1255,7 +1274,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func throwGrenade(preview: SKNode?, velocity: CGVector) {
         let grenade = (preview as? SKSpriteNode) ?? {
             let fallback = SKSpriteNode(texture: WeaponKind.grenade.authoredTexture, size: CGSize(width: 44, height: 58))
-            fallback.position = defenderMuzzle
+            fallback.position = weaponReadySpot(for: .grenade)
             world.addChild(fallback)
             return fallback
         }()
@@ -1331,9 +1350,29 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }]))
     }
 
-    private func throwExplosive(at point: CGPoint, radius: CGFloat, damage: CGFloat) {
+    /// A genuinely radial, distance-proportional knockback — replaces flat left/right pushes so a
+    /// point-blank hit sends a zombie flying while an edge-of-blast survivor barely staggers, and
+    /// the resulting trajectory (real direction, real magnitude) can chain into other zombies or
+    /// weapon props via ordinary physics collision, instead of every explosion looking the same.
+    private func radialImpulse(from origin: CGPoint, to position: CGPoint, radius: CGFloat, maxImpulse: CGFloat, minImpulse: CGFloat) -> CGVector {
+        let dx = position.x - origin.x
+        // Floors the vertical component so a same-height hit still reads as a launch upward
+        // rather than a shove straight along the ground.
+        let dy = max(60, position.y - origin.y)
+        let distance = max(1, hypot(dx, position.y - origin.y))
+        let falloff = max(0, 1 - distance / radius)
+        let magnitude = minImpulse + (maxImpulse - minImpulse) * falloff
+        let angle = atan2(dy, dx)
+        return CGVector(dx: cos(angle) * magnitude, dy: sin(angle) * magnitude)
+    }
+
+    private func throwExplosive(at point: CGPoint, radius: CGFloat, damage: CGFloat, maxImpulse: CGFloat = 460, minImpulse: CGFloat = 140) {
         for zombie in activeZombies where !zombie.isDefeated && hypot(zombie.position.x - point.x, zombie.position.y - point.y) < radius {
-            if zombie.damage(damage * zombie.kind.weaponDamageMultiplier, canOverkill: true) { defeat(zombie, reason: .explosion) }
+            if zombie.damage(damage * zombie.kind.weaponDamageMultiplier, canOverkill: true) {
+                defeat(zombie, reason: .explosion)
+            } else {
+                zombie.launch(with: radialImpulse(from: point, to: zombie.position, radius: radius, maxImpulse: maxImpulse, minImpulse: minImpulse))
+            }
         }
         playCombatVFX(.explosion, at: point, size: radius * 1.7, direction: 1)
         SoundManager.shared.play(.explosion)
@@ -1528,14 +1567,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         ]))
     }
 
-    /// `throwExplosive(at:radius:damage:)` only applies damage — meteor additionally throws
-    /// survivors outward so its "enormous physics impulse" is real knockback, not just damage.
     private func resolveMeteorImpact(at target: CGPoint) {
-        throwExplosive(at: target, radius: 260, damage: 10)
-        for zombie in activeZombies where !zombie.isDefeated && hypot(zombie.position.x - target.x, zombie.position.y - target.y) < 260 {
-            let direction: CGFloat = zombie.position.x < target.x ? -1 : 1
-            zombie.launch(with: CGVector(dx: direction * 420, dy: 420))
-        }
+        // Bigger radial impulse than a grenade/propane blast, matching the "enormous physics
+        // impulse" this weapon is meant for.
+        throwExplosive(at: target, radius: 260, damage: 10, maxImpulse: 640, minImpulse: 220)
     }
 
     private func spawnPhysicsDebris(from zombie: ZombieNode, reason: DefeatReason) {
