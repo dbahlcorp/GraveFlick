@@ -41,6 +41,10 @@ final class SoundManager {
     private var menuPlayer: AVAudioPlayer?
     private var gameplayPlayer: AVAudioPlayer?
     private var effectNodes: [AVAudioPlayerNode] = []
+    /// Zombie voice gets its own reserved nodes so a busy wave (movement grunts, weapon fire,
+    /// impacts all pulling from `effectNodes`) can't starve out spawn/hurt/attack/defeat barks —
+    /// which is exactly when a player most wants to hear the zombies.
+    private var zombieVoiceNodes: [AVAudioPlayerNode] = []
     private let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!
     private var settings = GameSettings()
     private var desiredMusicTrack: MusicTrack = .menu
@@ -62,6 +66,12 @@ final class SoundManager {
             engine.attach(node)
             engine.connect(node, to: engine.mainMixerNode, format: format)
         }
+        for _ in 0..<3 {
+            let node = AVAudioPlayerNode()
+            zombieVoiceNodes.append(node)
+            engine.attach(node)
+            engine.connect(node, to: engine.mainMixerNode, format: format)
+        }
         try? AVAudioSession.sharedInstance().setCategory(.ambient, options: [.mixWithOthers])
         try? AVAudioSession.sharedInstance().setActive(true)
         engine.prepare()
@@ -77,6 +87,7 @@ final class SoundManager {
             ambienceNode.stop()
             tensionNode.stop()
             effectNodes.forEach { $0.stop() }
+            zombieVoiceNodes.forEach { $0.stop() }
         }
         else if desiredMusicTrack == .gameplay, !ambienceNode.isPlaying { startEnvironmentalLayers() }
     }
@@ -318,11 +329,13 @@ final class SoundManager {
         guard settings.soundEnabled, ensureEffectsEngine() else { return }
         let now = Date().timeIntervalSinceReferenceDate
         guard now - lastZombieVoiceTime >= 0.05 else { return }
-        guard let node = effectNodes.first(where: { !$0.isPlaying }),
+        guard let node = zombieVoiceNodes.first(where: { !$0.isPlaying }),
               let buffer = zombieVocal(zombieVoiceSpec(for: kind, moment: moment)) else { return }
         lastZombieVoiceTime = now
         node.pan = max(-0.9, min(0.9, pan))
-        node.volume = Float(settings.soundVolume)
+        // Boosted relative to other effects: the vocal synth's low "throat" fundamental sits in the
+        // same register as the ambience hum/tension bass, so at matched volume it reads as buried.
+        node.volume = min(1, Float(settings.soundVolume) * 1.55)
         node.scheduleBuffer(buffer)
         node.play()
     }

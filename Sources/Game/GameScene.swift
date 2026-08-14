@@ -736,6 +736,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func fireScatterblast() {
+        let origin = CGPoint(x: houseFrame.midX + houseFrame.width * 0.18, y: groundY + houseFrame.height * 0.43)
         let center = CGPoint(x: size.width / 2, y: groundY + 110)
         let zombies = activeZombies.filter { !$0.isDefeated }
         for zombie in zombies {
@@ -744,9 +745,40 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             zombie.launch(with: CGVector(dx: direction * 390, dy: 270))
             if zombie.damage(zombie.kind == .brute ? 0.8 : 1.25) { defeat(zombie, reason: .weapon) }
         }
-        radialFlash(at: center, color: .yellow)
-        playDirectionalDebris(at: center, color: .orange, direction: 1, count: 10)
+        fireBuckshotSpread(from: origin)
+        radialFlash(at: origin, color: .yellow)
+        playDirectionalDebris(at: origin, color: .orange, direction: 1, count: 10)
         shakeCamera(intensity: 0.8)
+    }
+
+    /// Visible pellet fan reading as a shotgun blast out of the defender's window, so the shot
+    /// itself is legible instead of the hit resolution looking like an unexplained shockwave.
+    private func fireBuckshotSpread(from origin: CGPoint) {
+        guard settings.flashesEnabled else { return }
+        let pelletsPerSide = 5
+        for side in [-1, 1] as [CGFloat] {
+            for index in 0..<pelletsPerSide {
+                let spread = (CGFloat(index) / CGFloat(pelletsPerSide - 1)) - 0.5
+                let end = CGPoint(
+                    x: origin.x + side * size.width * CGFloat.random(in: 0.5...0.68),
+                    y: origin.y + spread * 90 + CGFloat.random(in: -12...12)
+                )
+                let path = CGMutablePath()
+                path.move(to: origin)
+                path.addLine(to: end)
+                let pellet = SKShapeNode(path: path)
+                pellet.strokeColor = SKColor(red: 1, green: 0.86, blue: 0.42, alpha: 0.82)
+                pellet.lineWidth = settings.reducedMotion ? 1.5 : 2.5
+                pellet.glowWidth = settings.reducedMotion ? 0 : 3
+                pellet.zPosition = 133
+                world.addChild(pellet)
+                pellet.run(.sequence([
+                    .wait(forDuration: Double(index) * 0.006),
+                    .fadeOut(withDuration: 0.10),
+                    .removeFromParent()
+                ]))
+            }
+        }
     }
 
     private func launchAirstrike() {
@@ -1255,8 +1287,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         ground.physicsBody?.contactTestBitMask = PhysicsCategory.zombie
         world.addChild(ground)
 
+        // Must stay well outside the off-screen defeat thresholds below (±220 x / -170 y) plus the
+        // largest zombie's half-width, or a hard-flicked zombie collides with this wall before ever
+        // crossing the threshold — leaving it stuck bouncing off-camera instead of being defeated.
         let boundaries = SKNode()
-        boundaries.physicsBody = SKPhysicsBody(edgeLoopFrom: CGRect(x: -120, y: -120, width: size.width + 240, height: size.height + 240))
+        boundaries.physicsBody = SKPhysicsBody(edgeLoopFrom: CGRect(x: -320, y: -320, width: size.width + 640, height: size.height + 640))
         boundaries.physicsBody?.categoryBitMask = PhysicsCategory.boundary
         boundaries.physicsBody?.collisionBitMask = PhysicsCategory.zombie
         world.addChild(boundaries)
