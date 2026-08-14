@@ -14,15 +14,25 @@ final class DinerNode: SKNode {
     private let marqueeArt = SKSpriteNode(imageNamed: "diner_marquee_1")
     private let doorArt = SKSpriteNode(imageNamed: "diner_door_1")
     private let ventArt = SKSpriteNode(imageNamed: "diner_vent_1")
+    private let defender: DinerDefenderNode
     private let reducedMotion: Bool
     private var damageStage = 0
     var currentDamageStage: Int { damageStage }
     var componentAnimationIsRunning: Bool {
         marqueeArt.action(forKey: "marqueeFrames") != nil || doorArt.action(forKey: "doorFrames") != nil || ventArt.action(forKey: "ventFrames") != nil
     }
+    var hasVisibleDefender: Bool { defender.hasAuthoredTexture && defender.alpha > 0.1 }
+    var defenderWeaponTier: Int { defender.weaponTier }
 
     init(frame: CGRect, reducedMotion: Bool, highContrast: Bool) {
         self.reducedMotion = reducedMotion
+        let previewTexture = SKTexture(imageNamed: "diner_complete")
+        let fittedBuildingSize = Self.aspectFit(previewTexture.size(), inside: frame.size)
+        defender = DinerDefenderNode(
+            windowSize: CGSize(width: fittedBuildingSize.width * 0.28, height: fittedBuildingSize.height * 0.235),
+            reducedMotion: reducedMotion,
+            weaponTier: 0
+        )
         super.init()
 
         name = "house"
@@ -75,6 +85,9 @@ final class DinerNode: SKNode {
         configureGlow(rightWindowGlow, rect: CGRect(x: width * 0.11, y: -height * 0.20,
                                                      width: width * 0.31, height: height * 0.27))
 
+        defender.position = CGPoint(x: width * 0.265, y: -height * 0.065)
+        addChild(defender)
+
         doorGlint.path = CGPath(roundedRect: CGRect(x: -width * 0.012, y: -height * 0.16,
                                                     width: width * 0.024, height: height * 0.30),
                                  cornerWidth: 3, cornerHeight: 3, transform: nil)
@@ -105,6 +118,24 @@ final class DinerNode: SKNode {
         return buildingsComplete && componentsComplete
     }
 
+    func configureDefender(weaponTier: Int) {
+        defender.setWeaponTier(weaponTier)
+    }
+
+    func aimDefender(at pointInParent: CGPoint?) {
+        guard let parent else { return }
+        let localPoint = pointInParent.map { convert($0, from: parent) }
+        defender.aim(at: localPoint)
+    }
+
+    func fireDefender() {
+        defender.fire()
+    }
+
+    func celebrateDefender() {
+        defender.celebrate()
+    }
+
     private func configureComponentArt(width: CGFloat, height: CGFloat) {
         marqueeArt.size = CGSize(width: width * 0.55, height: height * 0.20)
         marqueeArt.position = CGPoint(x: 0, y: height * 0.34)
@@ -126,6 +157,7 @@ final class DinerNode: SKNode {
     func takeHit(remainingHealth: Int, maximumHealth: Int) {
         let ratio = CGFloat(max(0, remainingHealth)) / CGFloat(max(1, maximumHealth))
         damageStage = max(damageStage, ratio <= 0 ? 3 : (ratio <= 0.34 ? 2 : (ratio <= 0.67 ? 1 : 0)))
+        defender.reactToDamage(stage: damageStage)
 
         [building, damagedBuilding, severeBuilding, destroyedBuilding].forEach {
             $0.run(.sequence([

@@ -170,6 +170,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
 
         let zombies = activeZombies
+        let nearestThreat = zombies
+            .filter { !$0.isDefeated && !$0.isGrabbed && !$0.isThrown }
+            .min { abs($0.position.x - houseFrame.midX) < abs($1.position.x - houseFrame.midX) }
+        dinerNode?.aimDefender(at: nearestThreat?.position)
         for zombie in zombies {
             zombie.updateWalking(deltaTime: deltaTime, reducedMotion: settings.reducedMotion)
             if zombie.isDefeated { continue }
@@ -289,6 +293,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let weaponLevel = progress.upgradeLevel(kind)
         weaponCooldowns[kind] = level.isSandbox ? 0 : GameRules.cooldown(base: kind.cooldown, rapidGearLevel: rapidGearLevel + weaponLevel)
         SoundManager.shared.playWeapon(kind)
+        if kind == .shotgun || kind == .sniper { dinerNode?.fireDefender() }
         switch kind {
         case .bowlingBall: launchBowlingBall()
         case .shotgun: fireScatterblast()
@@ -732,23 +737,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func fireScatterblast() {
         let center = CGPoint(x: size.width / 2, y: groundY + 110)
-        let scattergun = SKSpriteNode(texture: EquipmentArt.scatterblast.actionFrames[0], size: CGSize(width: 180, height: 180))
-        scattergun.position = CGPoint(x: center.x, y: center.y + 16)
-        scattergun.zPosition = 135
-        world.addChild(scattergun)
-        if settings.reducedMotion { scattergun.texture = EquipmentArt.scatterblast.actionFrames[1] }
-        else { scattergun.run(.animate(with: EquipmentArt.scatterblast.actionFrames, timePerFrame: 0.075, resize: false, restore: false), withKey: "artFrames") }
-        if settings.reducedMotion {
-            scattergun.run(.sequence([.wait(forDuration: 0.12), .fadeOut(withDuration: 0.10), .removeFromParent()]))
-        } else {
-            let recoil: CGFloat = 18
-            scattergun.run(.sequence([
-                .moveBy(x: -recoil, y: -recoil * 0.25, duration: 0.045),
-                .moveBy(x: recoil, y: recoil * 0.25, duration: 0.11),
-                .fadeOut(withDuration: 0.12),
-                .removeFromParent()
-            ]))
-        }
         let zombies = activeZombies.filter { !$0.isDefeated }
         for zombie in zombies {
             let dx = zombie.position.x - center.x
@@ -861,6 +849,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func fireSniper() {
         guard let target = activeZombies.filter({ !$0.isDefeated }).max(by: { $0.kind.scoreValue < $1.kind.scoreValue }) else { return }
+        let origin = CGPoint(x: houseFrame.midX + houseFrame.width * 0.18, y: groundY + houseFrame.height * 0.43)
+        let tracerPath = CGMutablePath()
+        tracerPath.move(to: origin)
+        tracerPath.addLine(to: target.position)
+        let tracer = SKShapeNode(path: tracerPath)
+        tracer.strokeColor = SKColor(red: 1, green: 0.82, blue: 0.28, alpha: 0.92)
+        tracer.lineWidth = settings.reducedMotion ? 2 : 4
+        tracer.glowWidth = settings.reducedMotion ? 0 : 5
+        tracer.zPosition = 134
+        world.addChild(tracer)
+        tracer.run(.sequence([.wait(forDuration: 0.04), .fadeOut(withDuration: 0.10), .removeFromParent()]))
         let hitDamage = target.kind.isBoss ? target.kind.hitPoints * 0.14 : target.kind.hitPoints * 1.2
         if target.damage(hitDamage) { defeat(target, reason: .weapon) }
         playDirectionalDebris(at: target.position, color: .yellow, direction: target.approachesFromLeft ? -1 : 1, count: 6)
@@ -1133,6 +1132,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func finish(won: Bool) {
         guard !gameOver else { return }
         gameOver = true
+        if won { dinerNode?.celebrateDefender() }
         selectedZombies.removeAll()
         touchSamples.removeAll()
         activeZombies.forEach { $0.physicsBody?.isDynamic = false }
@@ -1264,6 +1264,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func buildHouse() {
         let diner = DinerNode(frame: houseFrame, reducedMotion: settings.reducedMotion, highContrast: settings.highContrast)
+        diner.configureDefender(weaponTier: progress.upgradeLevel(.shotgun))
         dinerNode = diner
         world.addChild(diner)
     }
