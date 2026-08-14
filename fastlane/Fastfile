@@ -14,7 +14,6 @@ platform :ios do
       ASC_ISSUER_ID
       ASC_KEY_CONTENT
       APPLE_TEAM_ID
-      BUILD_NUMBER
     ]
     missing = required.select { |name| ENV[name].to_s.empty? }
     UI.user_error!("Missing release environment: #{missing.join(', ')}") unless missing.empty?
@@ -28,6 +27,17 @@ platform :ios do
 
     key_path = File.expand_path("../asc_key.p8", __dir__)
     File.binwrite(key_path, Base64.decode64(ENV.fetch("ASC_KEY_CONTENT")))
+
+    # Ask App Store Connect what the last uploaded build actually was, rather than trusting a
+    # number hand-maintained across project.yml/ios.yml/README — that drifted before and will
+    # again. `initial_build_number: 0` means a from-scratch app (no prior TestFlight build) still
+    # produces build 1 instead of erroring.
+    build_number = (latest_testflight_build_number(
+      api_key: api_key,
+      app_identifier: "com.bahlcorp.graveflick",
+      initial_build_number: 0
+    ) + 1).to_s
+    UI.message("Uploading as build #{build_number}")
 
     build_app(
       project: "GraveFlick.xcodeproj",
@@ -47,7 +57,7 @@ platform :ios do
         "-authenticationKeyIssuerID #{ENV.fetch('ASC_ISSUER_ID')}",
         "-authenticationKeyPath #{key_path}",
         "DEVELOPMENT_TEAM=#{ENV.fetch('APPLE_TEAM_ID')}",
-        "CURRENT_PROJECT_VERSION=#{ENV.fetch('BUILD_NUMBER')}"
+        "CURRENT_PROJECT_VERSION=#{build_number}"
       ].join(" ")
     )
 
