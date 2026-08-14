@@ -4,6 +4,8 @@ import AVFoundation
 final class SoundManager {
     static let shared = SoundManager()
 
+    private enum MusicTrack { case menu, gameplay }
+
     enum Effect {
         case grab, impact, defeat, dinerHit, weapon, bowlingRoll, bowlingImpact, waveClear, trap, pickup, victory, ready, heartbeat, zombieVoice, bossRoar
     }
@@ -22,9 +24,11 @@ final class SoundManager {
 
     private let engine = AVAudioEngine()
     private let musicNode = AVAudioPlayerNode()
+    private var menuPlayer: AVAudioPlayer?
     private var effectNodes: [AVAudioPlayerNode] = []
     private let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!
     private var settings = GameSettings()
+    private var desiredMusicTrack: MusicTrack = .menu
 
     private init() {
         engine.attach(musicNode)
@@ -42,11 +46,46 @@ final class SoundManager {
 
     func apply(_ settings: GameSettings) {
         self.settings = settings
-        if settings.musicEnabled { startMusic() } else { musicNode.stop() }
+        if settings.musicEnabled { playDesiredMusic() } else { stopMusic() }
     }
 
-    func startMusic() {
+    func startMenuMusic() {
+        desiredMusicTrack = .menu
+        playDesiredMusic()
+    }
+
+    func startGameplayMusic() {
+        desiredMusicTrack = .gameplay
+        playDesiredMusic()
+    }
+
+    private func playDesiredMusic() {
+        guard settings.musicEnabled else { return }
+        switch desiredMusicTrack {
+        case .menu: playMenuMusic()
+        case .gameplay: playGameplayMusic()
+        }
+    }
+
+    private func playMenuMusic() {
+        guard menuPlayer?.isPlaying != true else { return }
+        musicNode.stop()
+
+        if menuPlayer == nil,
+           let url = Bundle.main.url(forResource: "graveflick_menu_theme", withExtension: "wav") {
+            menuPlayer = try? AVAudioPlayer(contentsOf: url)
+            menuPlayer?.numberOfLoops = -1
+            menuPlayer?.volume = 0.62
+            menuPlayer?.prepareToPlay()
+        }
+
+        // The procedural loop is a safe fallback if the packaged WAV ever fails to load.
+        if menuPlayer?.play() != true { playGameplayMusic() }
+    }
+
+    private func playGameplayMusic() {
         guard settings.musicEnabled, !musicNode.isPlaying else { return }
+        menuPlayer?.stop()
         let notes: [Double] = [55, 65.41, 73.42, 49]
         let duration = 8.0
         guard let buffer = makeBuffer(duration: duration) else { return }
@@ -62,6 +101,11 @@ final class SoundManager {
         }
         musicNode.scheduleBuffer(buffer, at: nil, options: .loops)
         musicNode.play()
+    }
+
+    private func stopMusic() {
+        musicNode.stop()
+        menuPlayer?.stop()
     }
 
     func playBossLayer(phase: Int) {

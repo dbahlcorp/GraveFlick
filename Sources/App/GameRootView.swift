@@ -22,14 +22,15 @@ final class AppModel: ObservableObject {
         }
         screen = .game
         SoundManager.shared.apply(store.settings)
-        SoundManager.shared.startMusic()
+        SoundManager.shared.startGameplayMusic()
     }
 
     func startSandbox() { start(.sandbox) }
 
-    func leaveGame() {
+    func leaveGame(to destination: AppScreen = .menu) {
         session = nil
-        screen = .menu
+        screen = destination
+        SoundManager.shared.startMenuMusic()
     }
 
     func handleBackgrounding() {
@@ -817,7 +818,7 @@ private struct GameContainerView: View {
             Text("SCORE \(result.score)  •  +\(result.reward) COINS")
                 .font(.headline.weight(.black)).foregroundStyle(.white.opacity(0.72))
             HStack {
-                Button("LEVELS") { model.screen = .levels; model.session = nil }.buttonStyle(.bordered)
+                Button("LEVELS") { model.leaveGame(to: .levels) }.buttonStyle(.bordered)
                 if result.won, result.levelID < GameLevel.campaign.count {
                     Button("NEXT NIGHT") { model.start(GameLevel.campaign[result.levelID]) }
                         .buttonStyle(.borderedProminent).tint(.orange)
