@@ -1,5 +1,6 @@
 import SpriteKit
 import SwiftUI
+import UIKit
 
 enum AppScreen: Equatable {
     case menu, levels, challenges, sandbox, upgrades, settings, credits, game
@@ -163,24 +164,22 @@ private struct MainMenuView: View {
 
     var body: some View {
         ZStack {
-            Image("menu_key_art")
-                .resizable()
+            BundledArtImage(name: "menu_key_art", subdirectory: "Art/UI")
                 .scaledToFill()
                 .ignoresSafeArea()
             LinearGradient(
-                colors: [.clear, Color(red: 0.015, green: 0.02, blue: 0.045).opacity(0.38), .black.opacity(0.88)],
+                colors: [.black.opacity(0.06), Color(red: 0.015, green: 0.02, blue: 0.045).opacity(0.18), .black.opacity(0.68)],
                 startPoint: .leading,
                 endPoint: .trailing
             )
             .ignoresSafeArea()
-            LinearGradient(colors: [.black.opacity(0.14), .clear, .black.opacity(0.52)], startPoint: .top, endPoint: .bottom)
+            LinearGradient(colors: [.black.opacity(0.10), .clear, .black.opacity(0.36)], startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea()
 
             GeometryReader { geometry in
                 HStack(spacing: 24) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Image("ui_graveflick_logo")
-                            .resizable()
+                        BundledArtImage(name: "ui_graveflick_logo", subdirectory: "Art/UI")
                             .scaledToFit()
                             .frame(maxWidth: min(geometry.size.width * 0.42, 560), maxHeight: geometry.size.height * 0.30)
                             .accessibilityLabel("GraveFlick, Last Light Diner")
@@ -222,7 +221,7 @@ private struct MainMenuView: View {
                         }
 
                         HStack(spacing: 8) {
-                            Image("ui_currency_coin").resizable().scaledToFit().frame(width: 20, height: 20)
+                            BundledArtImage(name: "ui_currency_coin", subdirectory: "Art/UI/Icons").scaledToFit().frame(width: 20, height: 20)
                             Text("\(store.progress.currency) NIGHT COINS")
                             Spacer(minLength: 8)
                             Text(store.dailySummary)
@@ -235,7 +234,7 @@ private struct MainMenuView: View {
 
                         if let bestSurvival = store.progress.highScores[GameLevel.endless.id] {
                             HStack(spacing: 8) {
-                                Image("ui_survival").resizable().scaledToFit().frame(width: 16, height: 16)
+                                BundledArtImage(name: "ui_survival", subdirectory: "Art/UI/Icons").scaledToFit().frame(width: 16, height: 16)
                                 Text("BEST SURVIVAL SCORE \(bestSurvival)")
                                 Spacer(minLength: 8)
                             }
@@ -246,7 +245,7 @@ private struct MainMenuView: View {
                         }
                     }
                     .frame(width: min(max(330, geometry.size.width * 0.46), 460))
-                    .roadsidePanel(padding: 12)
+                    .menuBoardPanel(padding: 12)
                     .offset(x: entered ? 0 : 34)
                     .opacity(entered ? 1 : 0)
                 }
@@ -917,21 +916,45 @@ private struct MenuButton: View {
     let action: () -> Void
     var body: some View {
         Button(action: action) {
-            HStack {
-                Image(icon).resizable().scaledToFit().frame(width: 34, height: 34)
+            HStack(spacing: 11) {
+                BundledArtImage(name: icon, subdirectory: "Art/UI/Icons")
+                    .scaledToFit()
+                    .padding(7)
+                    .frame(width: 40, height: 40)
+                    .background(
+                        RadialGradient(colors: [color.opacity(0.42), .black.opacity(0.90)], center: .center, startRadius: 2, endRadius: 27),
+                        in: RoundedRectangle(cornerRadius: 10)
+                    )
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(.white.opacity(0.20)))
                 VStack(alignment: .leading, spacing: 0) {
                     Text(title).font(.headline.weight(.black)).tracking(1.5)
                     Text(subtitle).font(.system(size: 8, weight: .bold)).tracking(0.8).foregroundStyle(.white.opacity(0.62))
                 }
                 Spacer()
                 Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .black))
+                    .frame(width: 27, height: 27)
+                    .background(.black.opacity(0.42), in: Circle())
+                    .overlay(Circle().stroke(color.opacity(0.72)))
             }
             .foregroundStyle(.white)
-            .padding(.horizontal, 16)
-            .frame(height: 56)
-            .background(LinearGradient(colors: [color.opacity(0.44), Color.black.opacity(0.68)], startPoint: .top, endPoint: .bottom), in: RoundedRectangle(cornerRadius: 14))
-            .overlay(RoundedRectangle(cornerRadius: 14).stroke(color.opacity(0.88), lineWidth: 1.5))
-            .shadow(color: color.opacity(0.2), radius: 7)
+            .padding(.horizontal, 10)
+            .frame(height: 58)
+            .background(
+                LinearGradient(
+                    colors: [color.opacity(0.50), Color(red: 0.13, green: 0.08, blue: 0.055).opacity(0.96), .black.opacity(0.94)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                in: RoundedRectangle(cornerRadius: 15)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 15)
+                    .stroke(color.opacity(0.96), lineWidth: 1.7)
+                    .overlay(RoundedRectangle(cornerRadius: 11).stroke(.white.opacity(0.13)).padding(4))
+            }
+            .overlay(alignment: .top) { MarqueeBulbs(color: color).padding(.horizontal, 22).offset(y: -2) }
+            .shadow(color: color.opacity(0.30), radius: 9, y: 2)
         }
         .buttonStyle(.plain)
     }
@@ -944,21 +967,54 @@ private struct MenuTile: View {
     let color: Color
     let action: () -> Void
 
+    private var badge: String {
+        switch title {
+        case "LEVELS": "01"
+        case "SURVIVAL": "∞"
+        case "CHALLENGES": "★"
+        default: "LAB"
+        }
+    }
+
     var body: some View {
         Button(action: action) {
             HStack(spacing: 9) {
-                Image(icon).resizable().scaledToFit().frame(width: 28, height: 28)
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(LinearGradient(colors: [color.opacity(0.38), .black.opacity(0.86)], startPoint: .top, endPoint: .bottom))
+                    BundledArtImage(name: icon, subdirectory: "Art/UI/Icons")
+                        .scaledToFit()
+                        .padding(5)
+                }
+                .frame(width: 34, height: 34)
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(color.opacity(0.70)))
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title).font(.system(size: 12, weight: .black)).tracking(0.8)
                     Text(subtitle).font(.system(size: 7, weight: .bold)).tracking(0.6).foregroundStyle(.white.opacity(0.55))
                 }
                 Spacer(minLength: 0)
+                Text(badge)
+                    .font(.system(size: 8, weight: .black, design: .rounded))
+                    .foregroundStyle(color.opacity(0.95))
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 3)
+                    .background(.black.opacity(0.50), in: Capsule())
+                    .overlay(Capsule().stroke(color.opacity(0.42)))
             }
             .foregroundStyle(.white)
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 9)
             .frame(maxWidth: .infinity, minHeight: 55)
-            .background(LinearGradient(colors: [color.opacity(0.30), .black.opacity(0.72)], startPoint: .topLeading, endPoint: .bottomTrailing), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).stroke(color.opacity(0.68)))
+            .background(
+                LinearGradient(colors: [color.opacity(0.34), Color(red: 0.06, green: 0.065, blue: 0.07).opacity(0.97), .black.opacity(0.91)], startPoint: .topLeading, endPoint: .bottomTrailing),
+                in: UnevenRoundedRectangle(topLeadingRadius: 14, bottomLeadingRadius: 7, bottomTrailingRadius: 14, topTrailingRadius: 7)
+            )
+            .overlay {
+                UnevenRoundedRectangle(topLeadingRadius: 14, bottomLeadingRadius: 7, bottomTrailingRadius: 14, topTrailingRadius: 7)
+                    .stroke(color.opacity(0.76), lineWidth: 1.2)
+            }
+            .overlay(alignment: .leading) { Capsule().fill(color.opacity(0.9)).frame(width: 3, height: 35).offset(x: 1) }
+            .overlay(alignment: .topTrailing) { MenuRivet(color: color).padding(5) }
+            .shadow(color: color.opacity(0.15), radius: 5, y: 2)
         }
         .buttonStyle(.plain)
     }
@@ -973,15 +1029,89 @@ private struct UtilityMenuButton: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 5) {
-                Image(icon).resizable().scaledToFit().frame(width: 17, height: 17)
+                BundledArtImage(name: icon, subdirectory: "Art/UI/Icons").scaledToFit().frame(width: 18, height: 18)
                 Text(title).font(.system(size: 8, weight: .black)).lineLimit(1).minimumScaleFactor(0.7)
             }
             .foregroundStyle(.white.opacity(0.9))
             .frame(maxWidth: .infinity, minHeight: 38)
-            .background(Color.black.opacity(0.50), in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(color.opacity(0.56)))
+            .background(LinearGradient(colors: [color.opacity(0.20), .black.opacity(0.82)], startPoint: .top, endPoint: .bottom), in: Capsule())
+            .overlay(Capsule().stroke(color.opacity(0.64), lineWidth: 1.1))
+            .overlay(alignment: .bottom) { Capsule().fill(color.opacity(0.72)).frame(height: 2).padding(.horizontal, 13).offset(y: -2) }
+            .overlay(alignment: .leading) { MenuRivet(color: color).padding(.leading, 6) }
+            .overlay(alignment: .trailing) { MenuRivet(color: color).padding(.trailing, 6) }
         }
         .buttonStyle(.plain)
+    }
+}
+
+private struct MarqueeBulbs: View {
+    let color: Color
+
+    var body: some View {
+        HStack {
+            ForEach(0..<7, id: \.self) { index in
+                Circle()
+                    .fill(Color.white.opacity(0.88))
+                    .frame(width: 3, height: 3)
+                    .shadow(color: color, radius: 3)
+                if index != 6 { Spacer() }
+            }
+        }
+    }
+}
+
+private struct MenuRivet: View {
+    let color: Color
+
+    var body: some View {
+        Circle()
+            .fill(LinearGradient(colors: [.white.opacity(0.72), color.opacity(0.36), .black.opacity(0.75)], startPoint: .topLeading, endPoint: .bottomTrailing))
+            .frame(width: 5, height: 5)
+            .overlay(Circle().stroke(.black.opacity(0.55), lineWidth: 0.5))
+    }
+}
+
+private struct BundledArtImage: View {
+    let name: String
+    let subdirectory: String
+
+    private var image: UIImage? {
+        if let named = UIImage(named: name) { return named }
+
+        let candidateDirectories: [String?] = [subdirectory, "Resources/\(subdirectory)", nil]
+        for directory in candidateDirectories {
+            if let url = Bundle.main.url(forResource: name, withExtension: "png", subdirectory: directory),
+               let image = UIImage(contentsOfFile: url.path) {
+                return image
+            }
+        }
+        return nil
+    }
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image).resizable()
+            } else if name == "menu_key_art" {
+                LinearGradient(
+                    colors: [Color(red: 0.035, green: 0.10, blue: 0.16), Color(red: 0.07, green: 0.025, blue: 0.03), .black],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .overlay(alignment: .bottomLeading) {
+                    Ellipse()
+                        .fill(Color.orange.opacity(0.18))
+                        .frame(width: 520, height: 150)
+                        .blur(radius: 28)
+                        .offset(x: -80, y: 45)
+                }
+            } else {
+                Image(systemName: "bolt.fill")
+                    .resizable()
+                    .scaledToFit()
+                    .foregroundStyle(.white.opacity(0.72))
+            }
+        }
     }
 }
 
@@ -1048,6 +1178,22 @@ private struct ModalCard<Content: View>: View {
 }
 
 private extension View {
+    func menuBoardPanel(padding: CGFloat) -> some View {
+        self
+            .padding(padding)
+            .background(
+                LinearGradient(
+                    colors: [Color(red: 0.12, green: 0.13, blue: 0.13).opacity(0.86), Color(red: 0.02, green: 0.027, blue: 0.035).opacity(0.91)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                in: RoundedRectangle(cornerRadius: 18)
+            )
+            .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color(red: 0.35, green: 0.72, blue: 0.68).opacity(0.62), lineWidth: 1.4))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(.white.opacity(0.08)).padding(4))
+            .shadow(color: .black.opacity(0.48), radius: 14, y: 7)
+    }
+
     func roadsidePanel(padding: CGFloat) -> some View {
         self
             .padding(padding)

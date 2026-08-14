@@ -3,6 +3,7 @@ import UIKit
 
 enum UIArt: String, CaseIterable {
     case logo = "ui_graveflick_logo"
+    case menuKeyArt = "menu_key_art"
 
     var image: UIImage? { UIImage(named: rawValue) }
 
