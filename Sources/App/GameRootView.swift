@@ -198,57 +198,63 @@ private struct MainMenuView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
-                    VStack(spacing: 8) {
-                        Text("THE LAST LIGHT DINER NEVER CLOSES QUIETLY")
-                            .font(.system(size: 10, weight: .black))
-                            .tracking(1.5)
-                            .foregroundStyle(.white.opacity(0.72))
-                            .multilineTextAlignment(.center)
+                    // Dense stack of fixed-height buttons — on a small landscape phone (or with
+                    // Dynamic Type bumped up) this can outgrow the available height on its own;
+                    // scroll instead of letting the bottom rows run off-panel.
+                    ScrollView(showsIndicators: false) {
+                        VStack(spacing: 8) {
+                            Text("THE LAST LIGHT DINER NEVER CLOSES QUIETLY")
+                                .font(.system(size: 10, weight: .black))
+                                .tracking(1.5)
+                                .foregroundStyle(.white.opacity(0.72))
+                                .multilineTextAlignment(.center)
 
-                        MenuButton(title: store.progress.highestUnlockedLevel > 1 ? "CONTINUE" : "PLAY", subtitle: "NIGHT \(continueLevel.id) · \(continueLevel.title.uppercased())", icon: "ui_play", color: .orange) {
-                            model.start(continueLevel)
-                        }
+                            MenuButton(title: store.progress.highestUnlockedLevel > 1 ? "CONTINUE" : "PLAY", subtitle: "NIGHT \(continueLevel.id) · \(continueLevel.title.uppercased())", icon: "ui_play", color: .orange) {
+                                model.start(continueLevel)
+                            }
 
-                        HStack(spacing: 8) {
-                            MenuTile(title: "LEVELS", subtitle: "CAMPAIGN", icon: "ui_levels", color: .cyan) { model.screen = .levels }
-                            MenuTile(title: "SURVIVAL", subtitle: "ENDLESS", icon: "ui_survival", color: .red) { model.start(GameLevel.endless) }
-                        }
-                        HStack(spacing: 8) {
-                            MenuTile(title: "CHALLENGES", subtitle: "SPECIAL RULES", icon: "ui_star", color: .yellow) { model.screen = .challenges }
-                            MenuTile(title: "SANDBOX", subtitle: "FREE PLAY", icon: "ui_grave_time", color: .green) { model.startSandbox() }
-                        }
-
-                        HStack(spacing: 7) {
-                            UtilityMenuButton(title: "UPGRADES", icon: "ui_upgrades", color: .purple) { model.screen = .upgrades }
-                            UtilityMenuButton(title: "SETTINGS", icon: "ui_settings", color: .gray) { model.screen = .settings }
-                            UtilityMenuButton(title: "CREDITS", icon: "ui_info", color: .indigo) { model.screen = .credits }
-                        }
-
-                        HStack(spacing: 8) {
-                            BundledArtImage(name: "ui_currency_coin", subdirectory: "Art/UI/Icons").scaledToFit().frame(width: 20, height: 20)
-                            Text("\(store.progress.currency) NIGHT COINS")
-                            Spacer(minLength: 8)
-                            Text(store.dailySummary)
-                                .foregroundStyle(store.progress.dailyClaimed ? .green : .cyan)
-                        }
-                        .font(.system(size: 9, weight: .black))
-                        .foregroundStyle(.white.opacity(0.82))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.72)
-
-                        if let bestSurvival = store.progress.highScores[GameLevel.endless.id] {
                             HStack(spacing: 8) {
-                                BundledArtImage(name: "ui_survival", subdirectory: "Art/UI/Icons").scaledToFit().frame(width: 16, height: 16)
-                                Text("BEST SURVIVAL SCORE \(bestSurvival)")
+                                MenuTile(title: "LEVELS", subtitle: "CAMPAIGN", icon: "ui_levels", color: .cyan) { model.screen = .levels }
+                                MenuTile(title: "SURVIVAL", subtitle: "ENDLESS", icon: "ui_survival", color: .red) { model.start(GameLevel.endless) }
+                            }
+                            HStack(spacing: 8) {
+                                MenuTile(title: "CHALLENGES", subtitle: "SPECIAL RULES", icon: "ui_star", color: .yellow) { model.screen = .challenges }
+                                MenuTile(title: "SANDBOX", subtitle: "FREE PLAY", icon: "ui_grave_time", color: .green) { model.startSandbox() }
+                            }
+
+                            HStack(spacing: 7) {
+                                UtilityMenuButton(title: "UPGRADES", icon: "ui_upgrades", color: .purple) { model.screen = .upgrades }
+                                UtilityMenuButton(title: "SETTINGS", icon: "ui_settings", color: .gray) { model.screen = .settings }
+                                UtilityMenuButton(title: "CREDITS", icon: "ui_info", color: .indigo) { model.screen = .credits }
+                            }
+
+                            HStack(spacing: 8) {
+                                BundledArtImage(name: "ui_currency_coin", subdirectory: "Art/UI/Icons").scaledToFit().frame(width: 20, height: 20)
+                                Text("\(store.progress.currency) NIGHT COINS")
                                 Spacer(minLength: 8)
+                                Text(store.dailySummary)
+                                    .foregroundStyle(store.progress.dailyClaimed ? .green : .cyan)
                             }
                             .font(.system(size: 9, weight: .black))
-                            .foregroundStyle(.white.opacity(0.62))
+                            .foregroundStyle(.white.opacity(0.82))
                             .lineLimit(1)
                             .minimumScaleFactor(0.72)
+
+                            if let bestSurvival = store.progress.highScores[GameLevel.endless.id] {
+                                HStack(spacing: 8) {
+                                    BundledArtImage(name: "ui_survival", subdirectory: "Art/UI/Icons").scaledToFit().frame(width: 16, height: 16)
+                                    Text("BEST SURVIVAL SCORE \(bestSurvival)")
+                                    Spacer(minLength: 8)
+                                }
+                                .font(.system(size: 9, weight: .black))
+                                .foregroundStyle(.white.opacity(0.62))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.72)
+                            }
                         }
                     }
                     .frame(width: min(max(330, geometry.size.width * 0.46), 460))
+                    .frame(maxHeight: geometry.size.height)
                     .menuBoardPanel(padding: 12)
                     .offset(x: entered ? 0 : 34)
                     .opacity(entered ? 1 : 0)
@@ -287,40 +293,44 @@ private struct CreditsView: View {
         NightBackground {
             VStack(spacing: 16) {
                 ScreenHeader(title: "CREDITS & ACHIEVEMENTS", subtitle: "An original midnight survival comedy") { model.screen = .menu }
-                HStack(alignment: .top, spacing: 22) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("CREATED BY DBAHLCORP").font(.headline.weight(.black))
-                        Text("Design, gameplay, SwiftUI and SpriteKit implementation built for GraveFlick. Original character and App Store artwork generated specifically for this project with OpenAI image generation and integrated into the runtime.")
-                            .font(.callout).foregroundStyle(.white.opacity(0.64))
-                        Text("No artwork, code, characters, names, audio, or levels were copied from another game.")
-                            .font(.caption.weight(.bold)).foregroundStyle(.cyan)
-                        Text("Original music was composed with the free, open-source Strudel synthesizer. Zombie vocals are generated in-game from original oscillator and filtered-noise synthesis; no recorded samples are used.")
-                            .font(.caption).foregroundStyle(.white.opacity(0.58))
-                        Text("Local diagnostics use Apple MetricKit and never leave the device through the app.")
-                            .font(.caption).foregroundStyle(.white.opacity(0.52))
-                    }
-                    .padding(20)
-                    .frame(maxWidth: 430, alignment: .leading)
-                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 20))
-
-                    VStack(spacing: 8) {
-                        ForEach(achievements, id: \.0) { item in
-                            let unlocked = store.progress.achievements.contains(item.0)
-                            HStack {
-                                RoadsideIcon(imageName: unlocked ? "ui_achievement" : "ui_lock", color: unlocked ? .yellow : .gray)
-                                VStack(alignment: .leading) {
-                                    Text(item.1).font(.subheadline.weight(.black))
-                                    Text(item.2).font(.caption2).foregroundStyle(.white.opacity(0.55))
-                                }
-                                Spacer()
-                                Text(unlocked ? "+100" : "—").font(.caption.weight(.black)).foregroundStyle(.cyan)
-                            }
-                            .padding(.horizontal, 14)
-                            .frame(height: 52)
-                            .background(Color.white.opacity(unlocked ? 0.09 : 0.045), in: RoundedRectangle(cornerRadius: 14))
+                // The achievements column (9 fixed-height rows) can outgrow a landscape phone's
+                // vertical space on its own — scroll the whole content area rather than clip it.
+                ScrollView(showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 22) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("CREATED BY DBAHLCORP").font(.headline.weight(.black))
+                            Text("Design, gameplay, SwiftUI and SpriteKit implementation built for GraveFlick. Original character and App Store artwork generated specifically for this project with OpenAI image generation and integrated into the runtime.")
+                                .font(.callout).foregroundStyle(.white.opacity(0.64))
+                            Text("No artwork, code, characters, names, audio, or levels were copied from another game.")
+                                .font(.caption.weight(.bold)).foregroundStyle(.cyan)
+                            Text("Original music was composed with the free, open-source Strudel synthesizer. Zombie vocals are generated in-game from original oscillator and filtered-noise synthesis; no recorded samples are used.")
+                                .font(.caption).foregroundStyle(.white.opacity(0.58))
+                            Text("Local diagnostics use Apple MetricKit and never leave the device through the app.")
+                                .font(.caption).foregroundStyle(.white.opacity(0.52))
                         }
+                        .padding(20)
+                        .frame(maxWidth: 430, alignment: .leading)
+                        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 20))
+
+                        VStack(spacing: 8) {
+                            ForEach(achievements, id: \.0) { item in
+                                let unlocked = store.progress.achievements.contains(item.0)
+                                HStack {
+                                    RoadsideIcon(imageName: unlocked ? "ui_achievement" : "ui_lock", color: unlocked ? .yellow : .gray)
+                                    VStack(alignment: .leading) {
+                                        Text(item.1).font(.subheadline.weight(.black))
+                                        Text(item.2).font(.caption2).foregroundStyle(.white.opacity(0.55))
+                                    }
+                                    Spacer()
+                                    Text(unlocked ? "+100" : "—").font(.caption.weight(.black)).foregroundStyle(.cyan)
+                                }
+                                .padding(.horizontal, 14)
+                                .frame(height: 52)
+                                .background(Color.white.opacity(unlocked ? 0.09 : 0.045), in: RoundedRectangle(cornerRadius: 14))
+                            }
+                        }
+                        .frame(maxWidth: 440)
                     }
-                    .frame(maxWidth: 440)
                 }
             }
             .padding(32)
@@ -503,7 +513,11 @@ private struct SettingsView: View {
         NightBackground {
             VStack(spacing: 16) {
                 ScreenHeader(title: "SETTINGS", subtitle: "Tune the night shift") { model.screen = .menu }
-                SettingsPanel(store: store)
+                // Landscape-only means limited vertical room on smaller phones — scroll instead
+                // of letting the toggles/sliders/reset button run off the bottom of the screen.
+                ScrollView(showsIndicators: false) {
+                    SettingsPanel(store: store)
+                }
             }
             .padding(32)
         }
@@ -718,11 +732,11 @@ private struct GameContainerView: View {
     }
 
     private var actionBar: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 4) {
             if session.level.isSandbox { sandboxControls }
             sectionSign("WEAPONS", color: .orange)
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 4) {
+                HStack(spacing: 3) {
                     ForEach(WeaponKind.allCases.filter { (session.level.isSandbox || session.progress.isUnlocked($0)) && (session.level.modifier != .limitedWeapons || $0 == .bowlingBall) }) { weapon in
                         CooldownButton(title: weapon.title, icon: weapon.icon, remaining: session.weaponCooldowns[weapon, default: 0], isArmed: session.armedWeapon == weapon) { session.arm(weapon) }
                     }
@@ -734,23 +748,23 @@ private struct GameContainerView: View {
                 CooldownButton(title: trap.title, icon: trap.icon, remaining: session.trapCooldowns[trap, default: 0]) { session.use(trap) }
             }
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 5)
-        .background(LinearGradient(colors: [Color(red: 0.12, green: 0.105, blue: 0.085).opacity(0.92), .black.opacity(0.90)], startPoint: .top, endPoint: .bottom), in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.orange.opacity(0.54), lineWidth: 1.2))
-        .overlay(alignment: .top) { Rectangle().fill(Color.orange.opacity(0.44)).frame(height: 2).padding(.horizontal, 18) }
-        .shadow(color: .black.opacity(0.52), radius: 8, y: 4)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 4)
+        .background(LinearGradient(colors: [Color(red: 0.12, green: 0.105, blue: 0.085).opacity(0.92), .black.opacity(0.90)], startPoint: .top, endPoint: .bottom), in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.orange.opacity(0.54), lineWidth: 1))
+        .overlay(alignment: .top) { Rectangle().fill(Color.orange.opacity(0.44)).frame(height: 1.5).padding(.horizontal, 16) }
+        .shadow(color: .black.opacity(0.52), radius: 6, y: 3)
     }
 
     private func sectionSign(_ title: String, color: Color) -> some View {
         Text(title)
-            .font(.system(size: 8, weight: .black, design: .rounded))
-            .tracking(0.7)
+            .font(.system(size: 7, weight: .black, design: .rounded))
+            .tracking(0.6)
             .foregroundStyle(.white.opacity(0.84))
-            .padding(.horizontal, 8)
-            .frame(height: 28)
-            .background(LinearGradient(colors: [color.opacity(0.34), .black.opacity(0.82)], startPoint: .top, endPoint: .bottom), in: UnevenRoundedRectangle(topLeadingRadius: 8, bottomLeadingRadius: 3, bottomTrailingRadius: 8, topTrailingRadius: 3))
-            .overlay(UnevenRoundedRectangle(topLeadingRadius: 8, bottomLeadingRadius: 3, bottomTrailingRadius: 8, topTrailingRadius: 3).stroke(color.opacity(0.72)))
+            .padding(.horizontal, 6)
+            .frame(height: 22)
+            .background(LinearGradient(colors: [color.opacity(0.34), .black.opacity(0.82)], startPoint: .top, endPoint: .bottom), in: UnevenRoundedRectangle(topLeadingRadius: 6, bottomLeadingRadius: 2, bottomTrailingRadius: 6, topTrailingRadius: 2))
+            .overlay(UnevenRoundedRectangle(topLeadingRadius: 6, bottomLeadingRadius: 2, bottomTrailingRadius: 6, topTrailingRadius: 2).stroke(color.opacity(0.72)))
     }
 
     private var sandboxControls: some View {
@@ -793,21 +807,21 @@ private struct GameContainerView: View {
 
         var body: some View {
             Button(action: action) {
-                HStack(spacing: 4) {
+                HStack(spacing: 3) {
                     BundledArtImage(name: icon, subdirectory: "Art/Weapons")
                         .scaledToFit()
-                        .frame(width: 22, height: 22)
+                        .frame(width: 17, height: 17)
                     Text(remaining > 0 ? "\(Int(ceil(remaining)))" : title.uppercased())
-                        .font(.system(size: 7, weight: .black))
+                        .font(.system(size: 6.5, weight: .black))
                         .lineLimit(1)
                         .minimumScaleFactor(0.66)
                 }
-                .padding(.horizontal, 7)
-                .frame(minWidth: 62, minHeight: 34)
+                .padding(.horizontal, 6)
+                .frame(minWidth: 50, minHeight: 27)
                 .foregroundStyle(remaining <= 0 ? .white : .white.opacity(0.48))
-                .background(LinearGradient(colors: [Color.orange.opacity(remaining <= 0 ? 0.42 : 0.10), .black.opacity(0.88)], startPoint: .topLeading, endPoint: .bottomTrailing), in: UnevenRoundedRectangle(topLeadingRadius: 9, bottomLeadingRadius: 4, bottomTrailingRadius: 9, topTrailingRadius: 4))
-                .overlay(UnevenRoundedRectangle(topLeadingRadius: 9, bottomLeadingRadius: 4, bottomTrailingRadius: 9, topTrailingRadius: 4).stroke((remaining <= 0 ? Color.orange : Color.gray).opacity(0.68)))
-                .overlay(alignment: .topTrailing) { MenuRivet(color: remaining <= 0 ? .orange : .gray).padding(4) }
+                .background(LinearGradient(colors: [Color.orange.opacity(remaining <= 0 ? 0.42 : 0.10), .black.opacity(0.88)], startPoint: .topLeading, endPoint: .bottomTrailing), in: UnevenRoundedRectangle(topLeadingRadius: 7, bottomLeadingRadius: 3, bottomTrailingRadius: 7, topTrailingRadius: 3))
+                .overlay(UnevenRoundedRectangle(topLeadingRadius: 7, bottomLeadingRadius: 3, bottomTrailingRadius: 7, topTrailingRadius: 3).stroke((remaining <= 0 ? Color.orange : Color.gray).opacity(0.68)))
+                .overlay(alignment: .topTrailing) { MenuRivet(color: remaining <= 0 ? .orange : .gray).padding(3) }
                 .overlay(alignment: .bottom) {
                     if remaining > 0 {
                         GeometryReader { proxy in
@@ -820,8 +834,8 @@ private struct GameContainerView: View {
                     }
                 }
                 .overlay(
-                    UnevenRoundedRectangle(topLeadingRadius: 9, bottomLeadingRadius: 4, bottomTrailingRadius: 9, topTrailingRadius: 4)
-                        .stroke(Color.cyan, lineWidth: 2)
+                    UnevenRoundedRectangle(topLeadingRadius: 7, bottomLeadingRadius: 3, bottomTrailingRadius: 7, topTrailingRadius: 3)
+                        .stroke(Color.cyan, lineWidth: 1.6)
                         .opacity(isArmed ? (armedPulse ? 1 : 0.35) : 0)
                 )
             }
@@ -915,9 +929,15 @@ private struct GameContainerView: View {
 
     private var settingsModal: some View {
         ModalCard {
-            Text("SETTINGS").font(.title.weight(.black))
+            HStack {
+                Button(action: { showsSettings = false }) {
+                    Image("ui_back").resizable().scaledToFit().frame(width: 22, height: 22)
+                }
+                .hudButton(compact: true)
+                Text("SETTINGS").font(.title.weight(.black))
+                Spacer()
+            }
             SettingsPanel(store: store)
-            Button("DONE") { showsSettings = false }.buttonStyle(.borderedProminent).tint(.orange)
         }
     }
 
@@ -1240,19 +1260,37 @@ private struct ModalCard<Content: View>: View {
     var body: some View {
         ZStack {
             Color.black.opacity(0.67).ignoresSafeArea()
-            VStack(spacing: 17) { content() }
-                .foregroundStyle(.white)
-                .padding(32)
-                .background(LinearGradient(colors: [Color(red: 0.12, green: 0.13, blue: 0.16), Color(red: 0.035, green: 0.045, blue: 0.07)], startPoint: .top, endPoint: .bottom), in: RoundedRectangle(cornerRadius: 20))
-                .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color(red: 0.33, green: 0.72, blue: 0.69).opacity(0.62), lineWidth: 2))
-                .shadow(radius: 30)
-                .scaleEffect(presented ? 1 : 0.82)
-                .opacity(presented ? 1 : 0)
+            // GeometryReader + flexible spacers keeps a short modal (pause, result) visually
+            // centered exactly like before, but lets a tall one (settings, with every toggle,
+            // slider, and the difficulty picker) scroll instead of overflowing the screen —
+            // this game is landscape-only, so vertical room is tight on smaller phones.
+            GeometryReader { proxy in
+                ScrollView(showsIndicators: false) {
+                    VStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        card
+                        Spacer(minLength: 0)
+                    }
+                    .frame(minHeight: proxy.size.height)
+                }
+            }
         }
         .onAppear {
             if animated { withAnimation(.spring(response: 0.38, dampingFraction: 0.72)) { presented = true } }
             else { presented = true }
         }
+    }
+
+    private var card: some View {
+        VStack(spacing: 17) { content() }
+            .foregroundStyle(.white)
+            .padding(32)
+            .background(LinearGradient(colors: [Color(red: 0.12, green: 0.13, blue: 0.16), Color(red: 0.035, green: 0.045, blue: 0.07)], startPoint: .top, endPoint: .bottom), in: RoundedRectangle(cornerRadius: 20))
+            .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color(red: 0.33, green: 0.72, blue: 0.69).opacity(0.62), lineWidth: 2))
+            .shadow(radius: 30)
+            .scaleEffect(presented ? 1 : 0.82)
+            .opacity(presented ? 1 : 0)
+            .padding(.vertical, 20)
     }
 }
 

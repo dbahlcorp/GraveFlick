@@ -14,6 +14,8 @@ platform :ios do
       ASC_ISSUER_ID
       ASC_KEY_CONTENT
       APPLE_TEAM_ID
+      MATCH_PASSWORD
+      MATCH_GIT_TOKEN
     ]
     missing = required.select { |name| ENV[name].to_s.empty? }
     UI.user_error!("Missing release environment: #{missing.join(', ')}") unless missing.empty?
@@ -39,6 +41,21 @@ platform :ios do
     ) + 1).to_s
     UI.message("Uploading as build #{build_number}")
 
+    # Installs the shared signing certificate + provisioning profile from the private
+    # GraveFlick-Certificates repo instead of letting Xcode mint a fresh certificate on every
+    # CI run (`-allowProvisioningUpdates`) — that's what exhausted the account's certificate
+    # slots. `readonly: true` means this lane can only install what's already there; it can
+    # never create or revoke a certificate, so CI can't repeat the problem even if run a
+    # thousand times.
+    match(
+      type: "appstore",
+      readonly: true,
+      app_identifier: "com.bahlcorp.graveflick",
+      git_url: "https://github.com/dbahlcorp/GraveFlick-Certificates.git",
+      git_basic_authorization: Base64.strict_encode64("dbahlcorp:#{ENV.fetch('MATCH_GIT_TOKEN')}"),
+      api_key: api_key
+    )
+
     build_app(
       project: "GraveFlick.xcodeproj",
       scheme: "GraveFlick",
@@ -48,11 +65,13 @@ platform :ios do
       output_name: "GraveFlick.ipa",
       include_symbols: true,
       export_options: {
-        signingStyle: "automatic",
-        teamID: ENV.fetch("APPLE_TEAM_ID")
+        signingStyle: "manual",
+        teamID: ENV.fetch("APPLE_TEAM_ID"),
+        provisioningProfiles: {
+          "com.bahlcorp.graveflick" => "match AppStore com.bahlcorp.graveflick"
+        }
       },
       xcargs: [
-        "-allowProvisioningUpdates",
         "-authenticationKeyID #{ENV.fetch('ASC_KEY_ID')}",
         "-authenticationKeyIssuerID #{ENV.fetch('ASC_ISSUER_ID')}",
         "-authenticationKeyPath #{key_path}",

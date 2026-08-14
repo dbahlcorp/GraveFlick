@@ -27,17 +27,21 @@ enum ZombieKind: String, CaseIterable, Codable {
 
     var assetName: String { rawValue }
 
+    /// Regular kinds are scaled to ~82% of the original art size so they read as smaller than the
+    /// diner instead of rivaling its height — physics bodies, hit-testing, and spawn positioning
+    /// all derive from this, so the shrink stays consistent across visuals and gameplay. Bosses
+    /// (butcher, colossus) keep their full original size — they're supposed to loom over the lot.
     var size: CGSize {
         switch self {
-        case .walker: CGSize(width: 72, height: 112)
-        case .runner: CGSize(width: 72, height: 108)
-        case .brute: CGSize(width: 106, height: 132)
-        case .crawler: CGSize(width: 105, height: 72)
-        case .armored: CGSize(width: 84, height: 120)
-        case .volatile: CGSize(width: 104, height: 126)
-        case .waitress: CGSize(width: 78, height: 116)
-        case .riot: CGSize(width: 92, height: 126)
-        case .groundskeeper: CGSize(width: 88, height: 122)
+        case .walker: CGSize(width: 59, height: 92)
+        case .runner: CGSize(width: 59, height: 89)
+        case .brute: CGSize(width: 87, height: 108)
+        case .crawler: CGSize(width: 86, height: 59)
+        case .armored: CGSize(width: 69, height: 98)
+        case .volatile: CGSize(width: 85, height: 103)
+        case .waitress: CGSize(width: 64, height: 95)
+        case .riot: CGSize(width: 75, height: 103)
+        case .groundskeeper: CGSize(width: 72, height: 100)
         case .butcher: CGSize(width: 142, height: 164)
         case .colossus: CGSize(width: 154, height: 174)
         }
