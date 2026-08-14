@@ -45,6 +45,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var lastUpdateTime: TimeInterval = 0
     private var elapsedTime: TimeInterval = 0
     private var timeSinceSpawn: TimeInterval = 0
+    private var movementAudioRemaining: TimeInterval = 0.7
     private var score = 0
     private var health: Int
     private var wave = 1
@@ -105,6 +106,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         addChild(world)
         buildEnvironment()
         buildBossHUD()
+        SoundManager.shared.updateGameplayMix(wave: wave, healthFraction: 1)
         notifyDelegate()
         announce(text: level.title.uppercased(), color: .white)
         if !level.isSandbox {
@@ -124,6 +126,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         elapsedTime += deltaTime
         timeSinceSpawn += deltaTime
         tickCooldowns(deltaTime)
+        movementAudioRemaining -= deltaTime
 
         if level.isSandbox {
             // Sandbox spawns only through explicit player controls.
@@ -131,6 +134,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             let newWave = Int(elapsedTime / level.waveDuration) + 1
             if newWave != wave {
                 wave = newWave
+                SoundManager.shared.updateGameplayMix(wave: wave, healthFraction: CGFloat(health) / CGFloat(max(1, startingHealth)))
                 let incomingBoss = GameRules.bossKind(forWave: wave)
                 announce(text: incomingBoss.map { "\($0.displayName) INCOMING" } ?? "WAVE \(wave)", color: .white)
             }
@@ -163,6 +167,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 defeat(zombie, reason: .thrownOut)
             }
         }
+        if movementAudioRemaining <= 0,
+           let walker = zombies.filter({ !$0.isDefeated && !$0.isGrabbed && !$0.isThrown }).randomElement() {
+            SoundManager.shared.playMovement(for: walker.kind, pan: audioPan(for: walker))
+            movementAudioRemaining = max(0.42, 1.25 - Double(min(8, zombies.count)) * 0.07)
+        }
 
         notifyDelegate()
     }
@@ -178,6 +187,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                     spawnedInWave = 0
                     timeSinceSpawn = 99
                     waveStatus = "WAVE \(wave)"
+                    SoundManager.shared.updateGameplayMix(wave: wave, healthFraction: CGFloat(health) / CGFloat(max(1, startingHealth)))
                     let boss = GameRules.storyBossKind(levelID: level.id, wave: wave, totalWaves: level.totalWaves)
                     announce(text: boss.map { "\($0.displayName) INCOMING" } ?? "WAVE \(wave)", color: .white)
                 }
@@ -262,7 +272,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guard (level.isSandbox || progress.isUnlocked(kind)), weaponCooldowns[kind, default: 0] <= 0, !gameOver else { return }
         let weaponLevel = progress.upgradeLevel(kind)
         weaponCooldowns[kind] = level.isSandbox ? 0 : GameRules.cooldown(base: kind.cooldown, rapidGearLevel: rapidGearLevel + weaponLevel)
-        SoundManager.shared.play(.weapon)
+        SoundManager.shared.playWeapon(kind)
         switch kind {
         case .bowlingBall: launchBowlingBall()
         case .shotgun: fireScatterblast()
@@ -283,7 +293,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     func useTrap(_ kind: TrapKind) {
         guard progress.isUnlocked(kind), trapCooldowns[kind, default: 0] <= 0, !gameOver else { return }
         trapCooldowns[kind] = GameRules.cooldown(base: kind.cooldown, rapidGearLevel: rapidGearLevel)
-        SoundManager.shared.play(.trap)
+        SoundManager.shared.playTrap(kind)
         switch kind {
         case .spikeStrip: placeSpikeStrips()
         case .freezer: triggerFreezer()
@@ -294,7 +304,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     func useSpecial() {
         guard specialCharge >= 1, !gameOver else { return }
         specialCharge = 0
-        SoundManager.shared.play(.weapon)
+        SoundManager.shared.play(.special)
+        SoundManager.shared.duckMusic(strength: 0.34, duration: 0.55)
         announce(text: "GRAVE TIME", color: .cyan)
         for zombie in activeZombies {
             zombie.slow(for: 8, reducedMotion: settings.reducedMotion)
@@ -527,6 +538,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         )
         zombie.zPosition = 10
         world.addChild(zombie)
+        zombie.onArmorBroken = { SoundManager.shared.play(.armorBreak) }
+        zombie.onBossPhaseChanged = { [weak self, weak zombie] phase in
+            guard let self, let zombie else { return }
+            SoundManager.shared.playBossPhase(phase, pan: self.audioPan(for: zombie))
+            SoundManager.shared.updateGameplayMix(
+                wave: self.wave,
+                healthFraction: CGFloat(self.health) / CGFloat(max(1, self.startingHealth)),
+                bossPhase: phase
+            )
+        }
         if kind.isBoss {
             showBossHUD(for: zombie)
             SoundManager.shared.playZombieVoice(for: kind, moment: .spawn, pan: audioPan(for: zombie))
@@ -555,9 +576,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         playCombatVFX(.pavementImpact, at: CGPoint(x: strikeX, y: groundY + 72), size: 138, direction: zombie.approachesFromLeft ? 1 : -1, tint: .red)
         shakeCamera(intensity: 1.4)
         SoundManager.shared.play(.dinerHit)
+        SoundManager.shared.duckMusic(strength: 0.52, duration: 0.46)
+        SoundManager.shared.updateGameplayMix(
+            wave: wave,
+            healthFraction: CGFloat(health) / CGFloat(max(1, startingHealth)),
+            bossPhase: zombie.kind.isBoss ? zombie.bossPhase : 0
+        )
         runHaptic(.heavy)
         zombie.playDefeat(style: .dinerAttack, reducedMotion: settings.reducedMotion) {}
-        if zombie.kind.isBoss { bossHUD.isHidden = true }
+        if zombie.kind.isBoss {
+            bossHUD.isHidden = true
+            SoundManager.shared.updateGameplayMix(wave: wave, healthFraction: CGFloat(health) / CGFloat(max(1, startingHealth)))
+        }
         if health == 0 { finish(won: false) }
     }
 
@@ -577,7 +607,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             spawnPhysicsDebris(from: zombie, reason: reason)
         }
         zombie.playDefeat(style: defeatStyle(for: reason), reducedMotion: settings.reducedMotion) {}
-        if zombie.kind.isBoss { bossHUD.isHidden = true }
+        if zombie.kind.isBoss {
+            bossHUD.isHidden = true
+            SoundManager.shared.updateGameplayMix(wave: wave, healthFraction: CGFloat(health) / CGFloat(max(1, startingHealth)))
+        }
         if !finishingReplayUsed, !settings.reducedMotion, (zombie.kind.isBoss || (!level.isEndless && !level.isSandbox && spawningFinished && activeZombies.filter({ !$0.isDefeated }).count == 1)) {
             finishingReplayUsed = true
             world.speed = 0.22
@@ -628,6 +661,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
         }
         playCombatVFX(.explosion, at: point, size: 270, direction: 1)
+        SoundManager.shared.play(.explosion)
+        SoundManager.shared.duckMusic(strength: 0.48, duration: 0.42)
         shakeCamera(intensity: 1.2)
     }
 
@@ -736,6 +771,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             else { zombie.launch(with: CGVector(dx: (zombie.position.x < point.x ? -1 : 1) * 260, dy: 300)) }
         }
         playCombatVFX(.explosion, at: point, size: radius * 1.7, direction: 1, tint: color)
+        SoundManager.shared.play(.explosion)
+        SoundManager.shared.duckMusic(strength: 0.48, duration: 0.42)
         shakeCamera(intensity: 1)
     }
 
@@ -762,6 +799,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if zombie.damage(damage * zombie.kind.weaponDamageMultiplier) { defeat(zombie, reason: .explosion) }
         }
         playCombatVFX(.explosion, at: point, size: radius * 1.7, direction: 1)
+        SoundManager.shared.play(.explosion)
+        SoundManager.shared.duckMusic(strength: 0.48, duration: 0.42)
     }
 
     private func swingWreckingBall() {
@@ -900,6 +939,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if zombie.damage(5) { defeat(zombie, reason: .weapon) }
         }
         playCombatVFX(.explosion, at: point, size: 238, direction: indexDirection(for: x))
+        SoundManager.shared.play(.explosion)
+        SoundManager.shared.duckMusic(strength: 0.44, duration: 0.36)
         shakeCamera(intensity: 1.1)
     }
 
@@ -958,7 +999,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         selectedZombies.removeAll()
         touchSamples.removeAll()
         activeZombies.forEach { $0.physicsBody?.isDynamic = false }
-        if won { SoundManager.shared.play(.victory) }
+        SoundManager.shared.play(won ? .victory : .loss)
+        SoundManager.shared.duckMusic(strength: won ? 0.36 : 0.60, duration: 0.9)
         // Endless never "wins" (there's no wave count to clear), so its payout is scored from
         // performance instead of the win-gated per-level reward, and stars don't apply.
         let earnedStars = level.isEndless ? 0 : GameRules.stars(score: score, health: health, startingHealth: startingHealth, won: won)
@@ -1006,6 +1048,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                     return true
                 } else if current.name == "pickup-repair" {
                     health = min(startingHealth, health + 1)
+                    SoundManager.shared.updateGameplayMix(wave: wave, healthFraction: CGFloat(health) / CGFloat(max(1, startingHealth)))
                     current.removeFromParent()
                     SoundManager.shared.play(.pickup)
                     announce(text: "DINER REPAIRED", color: .green)

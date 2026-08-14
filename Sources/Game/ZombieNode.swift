@@ -206,6 +206,8 @@ final class ZombieNode: SKNode {
     private var freezeOverlay: SKNode?
     private var state: ZombieAnimationState = .walking
     var onHealthChanged: ((CGFloat) -> Void)?
+    var onArmorBroken: (() -> Void)?
+    var onBossPhaseChanged: ((Int) -> Void)?
     private(set) var bossIsStunned = false
     private var bossStunDamage: CGFloat = 0
     private(set) var bossPhase = 1
@@ -671,6 +673,7 @@ final class ZombieNode: SKNode {
             let nextPhase = fraction <= 0.33 ? 3 : (fraction <= 0.66 ? 2 : 1)
             if nextPhase != bossPhase {
                 bossPhase = nextPhase
+                onBossPhaseChanged?(nextPhase)
                 abilityTime = max(abilityTime, 3)
                 applyBossPhaseTint()
                 rig.run(.sequence([.scale(to: 1.1, duration: 0.16), .scale(to: 1, duration: 0.16)]), withKey: "bossPhase")
@@ -712,6 +715,7 @@ final class ZombieNode: SKNode {
         if (kind == .armored || kind == .riot), !armorBroken, health <= maximumHealth * 0.48 {
             armorBroken = true
             playArmorBreak()
+            onArmorBroken?()
         }
         if kind == .volatile, !volatileWarningActive, health <= maximumHealth * 0.55 {
             volatileWarningActive = true

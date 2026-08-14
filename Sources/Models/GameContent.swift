@@ -278,6 +278,9 @@ struct GameLevel: Identifiable, Hashable {
 struct GameSettings: Codable, Equatable {
     var musicEnabled = true
     var soundEnabled = true
+    var musicVolume = 0.78
+    var soundVolume = 0.86
+    var ambienceVolume = 0.72
     var hapticsEnabled = true
     var reducedMotion = false
     var highContrast = false
@@ -286,12 +289,15 @@ struct GameSettings: Codable, Equatable {
     var flashesEnabled = true
     var difficulty: GameDifficulty = .standard
 
-    private enum CodingKeys: String, CodingKey { case musicEnabled, soundEnabled, hapticsEnabled, reducedMotion, highContrast, goreEnabled, screenShakeEnabled, flashesEnabled, difficulty }
+    private enum CodingKeys: String, CodingKey { case musicEnabled, soundEnabled, musicVolume, soundVolume, ambienceVolume, hapticsEnabled, reducedMotion, highContrast, goreEnabled, screenShakeEnabled, flashesEnabled, difficulty }
     init() {}
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         musicEnabled = try values.decodeIfPresent(Bool.self, forKey: .musicEnabled) ?? true
         soundEnabled = try values.decodeIfPresent(Bool.self, forKey: .soundEnabled) ?? true
+        musicVolume = try values.decodeIfPresent(Double.self, forKey: .musicVolume) ?? 0.78
+        soundVolume = try values.decodeIfPresent(Double.self, forKey: .soundVolume) ?? 0.86
+        ambienceVolume = try values.decodeIfPresent(Double.self, forKey: .ambienceVolume) ?? 0.72
         hapticsEnabled = try values.decodeIfPresent(Bool.self, forKey: .hapticsEnabled) ?? true
         reducedMotion = try values.decodeIfPresent(Bool.self, forKey: .reducedMotion) ?? false
         highContrast = try values.decodeIfPresent(Bool.self, forKey: .highContrast) ?? false

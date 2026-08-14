@@ -81,4 +81,14 @@ final class ProgressStoreTests: XCTestCase {
         XCTAssertTrue(progress.isUnlocked(.propaneTank))
         XCTAssertFalse(progress.isUnlocked(.airstrike))
     }
+
+    func testLegacySettingsPayloadReceivesAudioMixDefaults() throws {
+        let legacy = #"{"musicEnabled":true,"soundEnabled":false,"hapticsEnabled":true}"#
+        defaults.set(Data(legacy.utf8), forKey: "graveflick.settings.v1")
+        let settings = ProgressStore(defaults: defaults).settings
+        XCTAssertEqual(settings.musicVolume, 0.78)
+        XCTAssertEqual(settings.soundVolume, 0.86)
+        XCTAssertEqual(settings.ambienceVolume, 0.72)
+        XCTAssertFalse(settings.soundEnabled)
+    }
 }

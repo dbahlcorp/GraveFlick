@@ -22,7 +22,7 @@ final class AppModel: ObservableObject {
         }
         screen = .game
         SoundManager.shared.apply(store.settings)
-        SoundManager.shared.startGameplayMusic()
+        SoundManager.shared.startGameplayMusic(environmentID: level.environmentID ?? ((level.isEndless || level.isSandbox) ? 5 : level.id))
     }
 
     func startSandbox() { start(.sandbox) }
@@ -138,6 +138,7 @@ struct GameRootView: View {
         .statusBarHidden()
         .persistentSystemOverlays(.hidden)
         .onChange(of: scenePhase) { _, phase in
+            SoundManager.shared.setApplicationActive(phase == .active)
             if phase != .active { model.handleBackgrounding() }
         }
     }
@@ -501,14 +502,19 @@ private struct SettingsPanel: View {
     var body: some View {
         VStack(spacing: 16) {
             VStack(spacing: 0) {
-                settingToggle("Music", icon: "ui_music", keyPath: \.musicEnabled)
-                settingToggle("Sound Effects", icon: "ui_sound", keyPath: \.soundEnabled)
-                settingToggle("Haptics", icon: "ui_upgrade_flick", keyPath: \.hapticsEnabled)
-                settingToggle("Reduced Motion", icon: "ui_upgrade_rapid", keyPath: \.reducedMotion)
-                settingToggle("High Contrast", icon: "ui_contrast", keyPath: \.highContrast)
-                settingToggle("Cartoon Gore", icon: "ui_heart", keyPath: \.goreEnabled)
-                settingToggle("Screen Shake", icon: "ui_grave_time", keyPath: \.screenShakeEnabled)
-                settingToggle("Flashes", icon: "ui_moon", keyPath: \.flashesEnabled)
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 0) {
+                    settingToggle("Music", icon: "ui_music", keyPath: \.musicEnabled)
+                    settingToggle("Sound Effects", icon: "ui_sound", keyPath: \.soundEnabled)
+                    settingToggle("Haptics", icon: "ui_upgrade_flick", keyPath: \.hapticsEnabled)
+                    settingToggle("Reduced Motion", icon: "ui_upgrade_rapid", keyPath: \.reducedMotion)
+                    settingToggle("High Contrast", icon: "ui_contrast", keyPath: \.highContrast)
+                    settingToggle("Cartoon Gore", icon: "ui_heart", keyPath: \.goreEnabled)
+                    settingToggle("Screen Shake", icon: "ui_grave_time", keyPath: \.screenShakeEnabled)
+                    settingToggle("Flashes", icon: "ui_moon", keyPath: \.flashesEnabled)
+                }
+                volumeSlider("Music Volume", icon: "ui_music", keyPath: \.musicVolume)
+                volumeSlider("Effects Volume", icon: "ui_sound", keyPath: \.soundVolume)
+                volumeSlider("Ambience", icon: "ui_moon", keyPath: \.ambienceVolume)
                 Picker("Difficulty", selection: $store.settings.difficulty) {
                     ForEach(GameDifficulty.allCases) { difficulty in Text(difficulty.title).tag(difficulty) }
                 }
@@ -549,6 +555,28 @@ private struct SettingsPanel: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 20)
         .frame(height: 54)
+    }
+
+    private func volumeSlider(_ title: String, icon: String, keyPath: WritableKeyPath<GameSettings, Double>) -> some View {
+        HStack(spacing: 12) {
+            Image(icon).resizable().scaledToFit().frame(width: 25, height: 25)
+            Text(title).font(.subheadline.weight(.semibold)).frame(width: 105, alignment: .leading)
+            Slider(value: Binding(
+                get: { store.settings[keyPath: keyPath] },
+                set: { value in
+                    store.settings[keyPath: keyPath] = value
+                    SoundManager.shared.apply(store.settings)
+                }
+            ), in: 0...1)
+            .tint(.orange)
+            Text("\(Int(store.settings[keyPath: keyPath] * 100))%")
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(.white.opacity(0.65))
+                .frame(width: 38, alignment: .trailing)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 20)
+        .frame(height: 46)
     }
 }
 

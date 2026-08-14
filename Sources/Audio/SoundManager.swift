@@ -7,7 +7,7 @@ final class SoundManager {
     private enum MusicTrack { case menu, gameplay }
 
     enum Effect {
-        case grab, impact, defeat, dinerHit, weapon, bowlingRoll, bowlingImpact, waveClear, trap, pickup, victory, ready, heartbeat, zombieVoice, bossRoar
+        case grab, impact, defeat, dinerHit, weapon, special, bowlingRoll, bowlingImpact, waveClear, trap, pickup, victory, loss, ready, heartbeat, zombieVoice, bossRoar, armorBreak, explosion
     }
 
     enum ZombieVoiceMoment { case spawn, hurt, attack, defeat }
@@ -36,16 +36,26 @@ final class SoundManager {
 
     private let engine = AVAudioEngine()
     private let musicNode = AVAudioPlayerNode()
+    private let ambienceNode = AVAudioPlayerNode()
+    private let tensionNode = AVAudioPlayerNode()
     private var menuPlayer: AVAudioPlayer?
     private var gameplayPlayer: AVAudioPlayer?
     private var effectNodes: [AVAudioPlayerNode] = []
     private let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!
     private var settings = GameSettings()
     private var desiredMusicTrack: MusicTrack = .menu
+    private var environmentID = 1
+    private var gameplayIntensity: Float = 0.12
+    private var duckScale: Float = 1
+    private var duckGeneration = 0
 
     private init() {
         engine.attach(musicNode)
         engine.connect(musicNode, to: engine.mainMixerNode, format: format)
+        engine.attach(ambienceNode)
+        engine.connect(ambienceNode, to: engine.mainMixerNode, format: format)
+        engine.attach(tensionNode)
+        engine.connect(tensionNode, to: engine.mainMixerNode, format: format)
         for _ in 0..<10 {
             let node = AVAudioPlayerNode()
             effectNodes.append(node)
@@ -59,17 +69,41 @@ final class SoundManager {
 
     func apply(_ settings: GameSettings) {
         self.settings = settings
+        applyMixVolumes()
         if settings.musicEnabled { playDesiredMusic() } else { stopMusic() }
+        if !settings.soundEnabled {
+            ambienceNode.stop()
+            tensionNode.stop()
+            effectNodes.forEach { $0.stop() }
+        }
+        else if desiredMusicTrack == .gameplay, !ambienceNode.isPlaying { startEnvironmentalLayers() }
     }
 
     func startMenuMusic() {
         desiredMusicTrack = .menu
+        ambienceNode.stop()
+        tensionNode.stop()
         playDesiredMusic()
     }
 
-    func startGameplayMusic() {
+    func startGameplayMusic(environmentID: Int) {
         desiredMusicTrack = .gameplay
+        self.environmentID = environmentID
         playDesiredMusic()
+        startEnvironmentalLayers()
+    }
+
+    func setApplicationActive(_ active: Bool) {
+        if active {
+            try? AVAudioSession.sharedInstance().setActive(true)
+            if !engine.isRunning { try? engine.start() }
+            playDesiredMusic()
+            if desiredMusicTrack == .gameplay, settings.soundEnabled, !ambienceNode.isPlaying { startEnvironmentalLayers() }
+        } else {
+            menuPlayer?.pause()
+            gameplayPlayer?.pause()
+            engine.pause()
+        }
     }
 
     private func playDesiredMusic() {
@@ -83,34 +117,38 @@ final class SoundManager {
     private func playMenuMusic() {
         guard menuPlayer?.isPlaying != true else { return }
         musicNode.stop()
-        gameplayPlayer?.stop()
 
         if menuPlayer == nil,
            let url = Bundle.main.url(forResource: "graveflick_menu_theme", withExtension: "wav") {
             menuPlayer = try? AVAudioPlayer(contentsOf: url)
             menuPlayer?.numberOfLoops = -1
-            menuPlayer?.volume = 0.62
+            menuPlayer?.volume = 0
             menuPlayer?.prepareToPlay()
         }
 
         // The procedural loop is a safe fallback if the packaged WAV ever fails to load.
-        if menuPlayer?.play() != true { playProceduralGameplayMusic() }
+        guard menuPlayer?.play() == true else { playProceduralGameplayMusic(); return }
+        gameplayPlayer?.setVolume(0, fadeDuration: 0.35)
+        menuPlayer?.setVolume(menuMusicVolume, fadeDuration: 0.35)
+        stopPlayerAfterFade(gameplayPlayer, unless: .gameplay)
     }
 
     private func playGameplayMusic() {
         guard settings.musicEnabled, gameplayPlayer?.isPlaying != true else { return }
-        menuPlayer?.stop()
         musicNode.stop()
 
         if gameplayPlayer == nil,
            let url = Bundle.main.url(forResource: "graveflick_gameplay_ambience", withExtension: "wav") {
             gameplayPlayer = try? AVAudioPlayer(contentsOf: url)
             gameplayPlayer?.numberOfLoops = -1
-            gameplayPlayer?.volume = 0.48
+            gameplayPlayer?.volume = 0
             gameplayPlayer?.prepareToPlay()
         }
 
-        if gameplayPlayer?.play() != true { playProceduralGameplayMusic() }
+        guard gameplayPlayer?.play() == true else { playProceduralGameplayMusic(); return }
+        menuPlayer?.setVolume(0, fadeDuration: 0.35)
+        gameplayPlayer?.setVolume(gameplayMusicVolume, fadeDuration: 0.35)
+        stopPlayerAfterFade(menuPlayer, unless: .menu)
     }
 
     private func playProceduralGameplayMusic() {
@@ -138,11 +176,134 @@ final class SoundManager {
         gameplayPlayer?.stop()
     }
 
+    private func startEnvironmentalLayers() {
+        guard settings.soundEnabled, desiredMusicTrack == .gameplay else { return }
+        ambienceNode.stop()
+        tensionNode.stop()
+        if let ambience = environmentalAmbience(for: environmentID) {
+            ambienceNode.scheduleBuffer(ambience, at: nil, options: .loops)
+            ambienceNode.play()
+        }
+        if let tension = tensionPulse() {
+            tensionNode.scheduleBuffer(tension, at: nil, options: .loops)
+            tensionNode.play()
+        }
+        applyMixVolumes()
+    }
+
+    func playWeapon(_ kind: WeaponKind) {
+        let spec: LayeredSpec = switch kind {
+        case .bowlingBall: LayeredSpec(low: 105, high: 280, duration: 0.20, volume: 0.18, noise: 0.34, sweep: 0.62, pulses: 1)
+        case .shotgun: LayeredSpec(low: 72, high: 1_850, duration: 0.34, volume: 0.30, noise: 0.72, sweep: 0.38, pulses: 1)
+        case .airstrike: LayeredSpec(low: 160, high: 1_180, duration: 0.48, volume: 0.16, noise: 0.12, sweep: 1.55, pulses: 3)
+        case .anvil: LayeredSpec(low: 96, high: 1_450, duration: 0.46, volume: 0.19, noise: 0.28, sweep: 0.44, pulses: 1)
+        case .grenade: LayeredSpec(low: 128, high: 2_200, duration: 0.28, volume: 0.16, noise: 0.18, sweep: 1.42, pulses: 2)
+        case .propaneTank: LayeredSpec(low: 82, high: 520, duration: 0.38, volume: 0.20, noise: 0.42, sweep: 0.68, pulses: 2)
+        case .wreckingBall: LayeredSpec(low: 48, high: 340, duration: 0.72, volume: 0.23, noise: 0.38, sweep: 0.58, pulses: 2)
+        case .sniper: LayeredSpec(low: 116, high: 3_100, duration: 0.22, volume: 0.27, noise: 0.52, sweep: 0.52, pulses: 1)
+        case .greaseFire: LayeredSpec(low: 92, high: 760, duration: 0.64, volume: 0.18, noise: 0.64, sweep: 0.78, pulses: 1)
+        case .transformer: LayeredSpec(low: 74, high: 2_500, duration: 0.62, volume: 0.19, noise: 0.22, sweep: 1.72, pulses: 5)
+        case .deliveryTruck: LayeredSpec(low: 92, high: 370, duration: 0.78, volume: 0.21, noise: 0.18, sweep: 0.88, pulses: 2)
+        case .meteor: LayeredSpec(low: 42, high: 920, duration: 0.86, volume: 0.25, noise: 0.55, sweep: 0.32, pulses: 1)
+        }
+        playLayered(spec)
+        if [.shotgun, .sniper, .meteor].contains(kind) { duckMusic(strength: 0.44, duration: 0.36) }
+    }
+
+    func playTrap(_ kind: TrapKind) {
+        let spec = kind == .spikeStrip
+            ? LayeredSpec(low: 118, high: 1_720, duration: 0.34, volume: 0.20, noise: 0.40, sweep: 0.64, pulses: 3)
+            : LayeredSpec(low: 52, high: 1_260, duration: 0.78, volume: 0.18, noise: 0.58, sweep: 1.28, pulses: 1)
+        playLayered(spec)
+    }
+
+    func playMovement(for kind: ZombieKind, pan: Float) {
+        let spec: LayeredSpec = switch kind {
+        case .crawler: LayeredSpec(low: 86, high: 460, duration: 0.24, volume: 0.07, noise: 0.72, sweep: 0.76, pulses: 1)
+        case .brute, .butcher, .colossus: LayeredSpec(low: 43, high: 124, duration: 0.30, volume: 0.13, noise: 0.50, sweep: 0.55, pulses: 1)
+        case .armored, .riot: LayeredSpec(low: 62, high: 780, duration: 0.22, volume: 0.09, noise: 0.38, sweep: 0.72, pulses: 1)
+        case .runner: LayeredSpec(low: 92, high: 330, duration: 0.14, volume: 0.07, noise: 0.55, sweep: 0.65, pulses: 2)
+        default: LayeredSpec(low: 68, high: 240, duration: 0.20, volume: 0.065, noise: 0.62, sweep: 0.70, pulses: 1)
+        }
+        playLayered(spec, pan: pan)
+    }
+
+    func playBossPhase(_ phase: Int, pan: Float = 0) {
+        playBossLayer(phase: phase)
+        let spec = LayeredSpec(low: phase >= 3 ? 36 : 48, high: phase >= 3 ? 820 : 620, duration: 0.82, volume: 0.25, noise: 0.48, sweep: 0.48, pulses: phase)
+        playLayered(spec, pan: pan)
+        duckMusic(strength: 0.62, duration: 0.68)
+    }
+
+    private struct LayeredSpec {
+        let low: Double
+        let high: Double
+        let duration: Double
+        let volume: Float
+        let noise: Float
+        let sweep: Double
+        let pulses: Int
+    }
+
+    private func playLayered(_ spec: LayeredSpec, pan: Float = 0) {
+        guard settings.soundEnabled,
+              let node = effectNodes.first(where: { !$0.isPlaying }),
+              let buffer = layeredEffect(spec) else { return }
+        node.pan = max(-0.9, min(0.9, pan))
+        node.volume = Float(settings.soundVolume)
+        node.scheduleBuffer(buffer)
+        node.play()
+    }
+
+    private var menuMusicVolume: Float { Float(settings.musicVolume) * 0.62 * duckScale }
+    private var gameplayMusicVolume: Float { Float(settings.musicVolume) * 0.48 * duckScale }
+
+    private func applyMixVolumes() {
+        menuPlayer?.volume = desiredMusicTrack == .menu ? menuMusicVolume : 0
+        gameplayPlayer?.volume = desiredMusicTrack == .gameplay ? gameplayMusicVolume : 0
+        musicNode.volume = Float(settings.musicVolume) * 0.7 * duckScale
+        ambienceNode.volume = settings.soundEnabled ? Float(settings.ambienceVolume) * 0.28 : 0
+        tensionNode.volume = settings.soundEnabled ? Float(settings.ambienceVolume) * gameplayIntensity * 0.34 : 0
+    }
+
+    private func stopPlayerAfterFade(_ player: AVAudioPlayer?, unless track: MusicTrack) {
+        Task { @MainActor [weak self, weak player] in
+            try? await Task.sleep(nanoseconds: 380_000_000)
+            guard let self, self.desiredMusicTrack != track else { return }
+            player?.stop()
+        }
+    }
+
+    func updateGameplayMix(wave: Int, healthFraction: CGFloat, bossPhase: Int = 0) {
+        let wavePressure = min(0.55, Float(max(0, wave - 1)) * 0.08)
+        let damagePressure = Float(max(0, 1 - healthFraction)) * 0.38
+        let bossPressure = bossPhase > 0 ? 0.22 + Float(max(0, bossPhase - 1)) * 0.14 : 0
+        gameplayIntensity = min(1, 0.10 + wavePressure + damagePressure + bossPressure)
+        applyMixVolumes()
+    }
+
+    func duckMusic(strength: Float = 0.55, duration: TimeInterval = 0.42) {
+        guard settings.musicEnabled, settings.soundEnabled else { return }
+        duckGeneration += 1
+        let generation = duckGeneration
+        duckScale = max(0.18, 1 - strength)
+        menuPlayer?.setVolume(menuMusicVolume, fadeDuration: 0.04)
+        gameplayPlayer?.setVolume(gameplayMusicVolume, fadeDuration: 0.04)
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(max(0, duration) * 1_000_000_000))
+            guard let self, self.duckGeneration == generation else { return }
+            self.duckScale = 1
+            self.menuPlayer?.setVolume(self.menuMusicVolume, fadeDuration: 0.22)
+            self.gameplayPlayer?.setVolume(self.gameplayMusicVolume, fadeDuration: 0.22)
+        }
+    }
+
     func playZombieVoice(for kind: ZombieKind, moment: ZombieVoiceMoment, pan: Float = 0) {
         guard settings.soundEnabled,
               let node = effectNodes.first(where: { !$0.isPlaying }),
               let buffer = zombieVocal(zombieVoiceSpec(for: kind, moment: moment)) else { return }
         node.pan = max(-0.9, min(0.9, pan))
+        node.volume = Float(settings.soundVolume)
         node.scheduleBuffer(buffer)
         node.play()
     }
@@ -152,6 +313,7 @@ final class SoundManager {
         let notes = phase >= 3 ? [82.41, 55, 98] : [65.41, 73.42, 55]
         guard let node = effectNodes.first(where: { !$0.isPlaying }), let buffer = fanfare(notes: notes, noteDuration: 0.16, volume: 0.11) else { return }
         node.pan = 0
+        node.volume = Float(settings.musicVolume)
         node.scheduleBuffer(buffer); node.play()
     }
 
@@ -165,12 +327,18 @@ final class SoundManager {
         switch effect {
         case .victory:
             buffer = fanfare(notes: [523.25, 659.25, 783.99, 1046.50], noteDuration: 0.13, volume: 0.17)
+        case .loss:
+            buffer = fanfare(notes: [196, 155.56, 116.54, 73.42], noteDuration: 0.20, volume: 0.19)
         case .pickup:
             buffer = fanfare(notes: [659.25, 987.77], noteDuration: 0.07, volume: 0.13)
         case .heartbeat:
             buffer = heartbeatPulse()
         case .bossRoar:
             buffer = tone(ToneSpec(frequency: 68, duration: 0.62, volume: 0.26, pitchSweep: 0.52, noiseMix: 0.48))
+        case .armorBreak:
+            buffer = layeredEffect(LayeredSpec(low: 94, high: 1_680, duration: 0.42, volume: 0.23, noise: 0.64, sweep: 0.48, pulses: 3))
+        case .explosion:
+            buffer = layeredEffect(LayeredSpec(low: 44, high: 720, duration: 0.58, volume: 0.28, noise: 0.74, sweep: 0.34, pulses: 1))
         case .zombieVoice:
             buffer = tone(ToneSpec(frequency: 115, duration: 0.28, volume: 0.13, pitchSweep: 0.72, noiseMix: 0.36))
         case .bowlingRoll:
@@ -187,6 +355,7 @@ final class SoundManager {
 
         guard let buffer else { return }
         node.pan = 0
+        node.volume = Float(settings.soundVolume)
         node.scheduleBuffer(buffer)
         node.play()
     }
@@ -200,11 +369,79 @@ final class SoundManager {
         case .defeat: ToneSpec(frequency: 220, duration: 0.20, volume: 0.17, pitchSweep: 1.3, noiseMix: 0.10)
         case .dinerHit: ToneSpec(frequency: 78, duration: 0.32, volume: 0.27, pitchSweep: 0.42, noiseMix: 0.42)
         case .weapon: ToneSpec(frequency: 640, duration: 0.16, volume: 0.15, pitchSweep: 1.4, noiseMix: 0.06)
+        case .special: ToneSpec(frequency: 54, duration: 0.72, volume: 0.22, pitchSweep: 1.82, noiseMix: 0.34, detune: false)
         case .bowlingImpact: ToneSpec(frequency: 82, duration: 0.26, volume: 0.27, pitchSweep: 0.48, noiseMix: 0.50, detune: false)
         case .trap: ToneSpec(frequency: 320, duration: 0.18, volume: 0.13, pitchSweep: 0.85, noiseMix: 0.10)
         case .ready: ToneSpec(frequency: 880, duration: 0.05, volume: 0.09, pitchSweep: 1.15, noiseMix: 0, detune: false)
-        case .pickup, .victory, .heartbeat, .zombieVoice, .bossRoar, .bowlingRoll, .waveClear: ToneSpec(frequency: 660, duration: 0.1, volume: 0.13)
+        case .pickup, .victory, .loss, .heartbeat, .zombieVoice, .bossRoar, .armorBreak, .explosion, .bowlingRoll, .waveClear: ToneSpec(frequency: 660, duration: 0.1, volume: 0.13)
         }
+    }
+
+    private func layeredEffect(_ spec: LayeredSpec) -> AVAudioPCMBuffer? {
+        guard let buffer = makeBuffer(duration: spec.duration), let channel = buffer.floatChannelData?[0] else { return nil }
+        let frames = Int(buffer.frameLength)
+        let sampleRate = format.sampleRate
+        var lowPhase = 0.0
+        var highPhase = 0.0
+        var filteredNoise: Float = 0
+        let pulseCount = max(1, spec.pulses)
+        for index in 0..<frames {
+            let time = Double(index) / sampleRate
+            let progress = Double(index) / Double(frames)
+            let lowFrequency = spec.low * pow(spec.sweep, progress)
+            let highFrequency = spec.high * pow(max(0.55, min(1.8, 2 - spec.sweep)), progress)
+            lowPhase += 2 * .pi * lowFrequency / sampleRate
+            highPhase += 2 * .pi * highFrequency / sampleRate
+            filteredNoise = filteredNoise * 0.76 + Float.random(in: -1...1) * 0.24
+            let body = Float(sin(lowPhase) + 0.28 * sin(lowPhase * 2.03))
+            let edge = Float(sin(highPhase))
+            let pulsePhase = (progress * Double(pulseCount)).truncatingRemainder(dividingBy: 1)
+            let pulseEnvelope = Float(pow(max(0, 1 - pulsePhase), pulseCount > 1 ? 2.2 : 0.5))
+            let attack = min(1, Float(index) / Float(max(1, Int(sampleRate * 0.006))))
+            let decay = Float(pow(1 - progress, 1.55))
+            let tonal = body * 0.64 + edge * 0.36
+            let sample = tonal * (1 - spec.noise) + filteredNoise * spec.noise
+            channel[index] = Float(tanh(Double(sample * 1.35))) * spec.volume * attack * decay * pulseEnvelope
+        }
+        return buffer
+    }
+
+    /// A low diner hum, distant road wash, neon buzz, and location-specific weather texture.
+    private func environmentalAmbience(for environmentID: Int) -> AVAudioPCMBuffer? {
+        let duration = 12.0
+        guard let buffer = makeBuffer(duration: duration), let channel = buffer.floatChannelData?[0] else { return nil }
+        let frames = Int(buffer.frameLength)
+        let sampleRate = format.sampleRate
+        let weatherMix: Float = [2, 5, 7].contains(environmentID) ? 0.72 : ([3, 6, 8].contains(environmentID) ? 0.48 : 0.30)
+        let humFrequency = 57.0 + Double(environmentID % 4) * 3.0
+        var roadNoise: Float = 0
+        var rainNoise: Float = 0
+        for index in 0..<frames {
+            let time = Double(index) / sampleRate
+            roadNoise = roadNoise * 0.994 + Float.random(in: -1...1) * 0.006
+            rainNoise = rainNoise * 0.72 + Float.random(in: -1...1) * 0.28
+            let hum = Float(sin(2 * .pi * humFrequency * time) + 0.22 * sin(2 * .pi * humFrequency * 2 * time))
+            let neon = Float(sin(2 * .pi * 120 * time)) * (sin(2 * .pi * 0.17 * time) > 0.84 ? 1 : 0.12)
+            let distantTraffic = roadNoise * Float(0.55 + 0.45 * sin(2 * .pi * 0.035 * time))
+            let weather = rainNoise * weatherMix * Float(0.45 + 0.20 * sin(2 * .pi * 0.11 * time))
+            channel[index] = (hum * 0.025 + neon * 0.009 + distantTraffic * 0.12 + weather * 0.055)
+        }
+        return buffer
+    }
+
+    private func tensionPulse() -> AVAudioPCMBuffer? {
+        let duration = 4.0
+        guard let buffer = makeBuffer(duration: duration), let channel = buffer.floatChannelData?[0] else { return nil }
+        let frames = Int(buffer.frameLength)
+        let sampleRate = format.sampleRate
+        for index in 0..<frames {
+            let time = Double(index) / sampleRate
+            let swell = Float(pow(sin(.pi * time / duration), 2))
+            let bass = Float(sin(2 * .pi * 43.65 * time) + 0.35 * sin(2 * .pi * 65.41 * time))
+            let pulse = Float(0.42 + 0.58 * max(0, sin(2 * .pi * 0.75 * time)))
+            channel[index] = bass * swell * pulse * 0.12
+        }
+        return buffer
     }
 
     /// Renders a short sequence of notes into one buffer so a multi-note cue only occupies a single voice.
