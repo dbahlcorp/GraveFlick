@@ -829,13 +829,55 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             debris.physicsBody?.angularVelocity = CGFloat.random(in: -5...5)
             debris.run(.sequence([.wait(forDuration: 2.4), .fadeOut(withDuration: 0.5), .removeFromParent()]))
         }
-        let decal = SKShapeNode(ellipseOf: CGSize(width: zombie.kind.isBoss ? 120 : 68, height: 18))
-        decal.fillColor = SKColor(red: 0.22, green: 0.42, blue: 0.08, alpha: 0.48)
-        decal.strokeColor = .clear
-        decal.position = CGPoint(x: zombie.position.x, y: groundY + 2)
-        decal.zPosition = 2
-        world.addChild(decal)
-        decal.run(.sequence([.wait(forDuration: 8), .fadeOut(withDuration: 2), .removeFromParent()]))
+        let splatterScale = (zombie.kind.isBoss ? 1.7 : 1) * (reason == .explosion ? 1.5 : 1)
+        spawnGoreSplatter(at: zombie.position, scale: splatterScale, direction: zombie.approachesFromLeft ? -1 : 1)
+    }
+
+    /// Ground-plane blood splat: an irregular pool plus scattered droplets sprayed away from the
+    /// kill, so gore reads as a Zombie Smash-style splatter instead of one uniform static blob.
+    private func spawnGoreSplatter(at point: CGPoint, scale: CGFloat, direction: CGFloat) {
+        let baseColor = (red: CGFloat(0.22), green: CGFloat(0.42), blue: CGFloat(0.08))
+        let container = SKNode()
+        container.position = CGPoint(x: point.x, y: groundY + 2)
+        container.zPosition = 2
+        world.addChild(container)
+
+        let pool = SKShapeNode(path: splatterBlobPath(radius: 30 * scale))
+        pool.fillColor = SKColor(red: baseColor.red, green: baseColor.green, blue: baseColor.blue, alpha: 0.5)
+        pool.strokeColor = .clear
+        container.addChild(pool)
+
+        let dropletCount = Int(6 * scale)
+        for _ in 0..<dropletCount {
+            let shade = CGFloat.random(in: -0.06...0.06)
+            let droplet = SKShapeNode(path: splatterBlobPath(radius: CGFloat.random(in: 4...10) * scale, points: 7))
+            droplet.fillColor = SKColor(red: max(0, baseColor.red + shade), green: max(0, min(1, baseColor.green + shade)), blue: baseColor.blue, alpha: CGFloat.random(in: 0.36...0.55))
+            droplet.strokeColor = .clear
+            let travel = CGFloat.random(in: 18...100) * scale
+            droplet.position = CGPoint(x: direction * travel + CGFloat.random(in: -22...22), y: CGFloat.random(in: -8...8))
+            container.addChild(droplet)
+        }
+
+        container.alpha = 0
+        container.setScale(0.6)
+        container.run(.sequence([
+            .group([.fadeAlpha(to: 1, duration: 0.08), .scale(to: 1, duration: 0.12)]),
+            .wait(forDuration: Double.random(in: 6...9)),
+            .fadeOut(withDuration: 2),
+            .removeFromParent()
+        ]))
+    }
+
+    private func splatterBlobPath(radius: CGFloat, points: Int = 9) -> CGPath {
+        let path = CGMutablePath()
+        for index in 0..<points {
+            let angle = (CGFloat(index) / CGFloat(points)) * .pi * 2
+            let jittered = radius * CGFloat.random(in: 0.7...1.15)
+            let vertex = CGPoint(x: cos(angle) * jittered, y: sin(angle) * jittered * 0.5)
+            if index == 0 { path.move(to: vertex) } else { path.addLine(to: vertex) }
+        }
+        path.closeSubpath()
+        return path
     }
 
     private func airstrikeImpact(x: CGFloat) {
