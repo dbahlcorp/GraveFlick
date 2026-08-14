@@ -10,6 +10,8 @@ final class SoundManager {
         case grab, impact, defeat, dinerHit, weapon, bowlingRoll, bowlingImpact, waveClear, trap, pickup, victory, ready, heartbeat, zombieVoice, bossRoar
     }
 
+    enum ZombieVoiceMoment { case spawn, hurt, attack, defeat }
+
     private struct ToneSpec {
         var frequency: Double
         let duration: Double
@@ -22,9 +24,20 @@ final class SoundManager {
         var detune: Bool = true
     }
 
+    private struct ZombieVoiceSpec {
+        var fundamental: Double
+        var duration: Double
+        var volume: Float
+        var pitchSweep: Double
+        var noiseMix: Float
+        var raspRate: Double
+        var formant: Double
+    }
+
     private let engine = AVAudioEngine()
     private let musicNode = AVAudioPlayerNode()
     private var menuPlayer: AVAudioPlayer?
+    private var gameplayPlayer: AVAudioPlayer?
     private var effectNodes: [AVAudioPlayerNode] = []
     private let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!
     private var settings = GameSettings()
@@ -70,6 +83,7 @@ final class SoundManager {
     private func playMenuMusic() {
         guard menuPlayer?.isPlaying != true else { return }
         musicNode.stop()
+        gameplayPlayer?.stop()
 
         if menuPlayer == nil,
            let url = Bundle.main.url(forResource: "graveflick_menu_theme", withExtension: "wav") {
@@ -80,12 +94,27 @@ final class SoundManager {
         }
 
         // The procedural loop is a safe fallback if the packaged WAV ever fails to load.
-        if menuPlayer?.play() != true { playGameplayMusic() }
+        if menuPlayer?.play() != true { playProceduralGameplayMusic() }
     }
 
     private func playGameplayMusic() {
-        guard settings.musicEnabled, !musicNode.isPlaying else { return }
+        guard settings.musicEnabled, gameplayPlayer?.isPlaying != true else { return }
         menuPlayer?.stop()
+        musicNode.stop()
+
+        if gameplayPlayer == nil,
+           let url = Bundle.main.url(forResource: "graveflick_gameplay_ambience", withExtension: "wav") {
+            gameplayPlayer = try? AVAudioPlayer(contentsOf: url)
+            gameplayPlayer?.numberOfLoops = -1
+            gameplayPlayer?.volume = 0.48
+            gameplayPlayer?.prepareToPlay()
+        }
+
+        if gameplayPlayer?.play() != true { playProceduralGameplayMusic() }
+    }
+
+    private func playProceduralGameplayMusic() {
+        guard settings.musicEnabled, !musicNode.isPlaying else { return }
         let notes: [Double] = [55, 65.41, 73.42, 49]
         let duration = 8.0
         guard let buffer = makeBuffer(duration: duration) else { return }
@@ -106,12 +135,23 @@ final class SoundManager {
     private func stopMusic() {
         musicNode.stop()
         menuPlayer?.stop()
+        gameplayPlayer?.stop()
+    }
+
+    func playZombieVoice(for kind: ZombieKind, moment: ZombieVoiceMoment, pan: Float = 0) {
+        guard settings.soundEnabled,
+              let node = effectNodes.first(where: { !$0.isPlaying }),
+              let buffer = zombieVocal(zombieVoiceSpec(for: kind, moment: moment)) else { return }
+        node.pan = max(-0.9, min(0.9, pan))
+        node.scheduleBuffer(buffer)
+        node.play()
     }
 
     func playBossLayer(phase: Int) {
         guard settings.musicEnabled else { return }
         let notes = phase >= 3 ? [82.41, 55, 98] : [65.41, 73.42, 55]
         guard let node = effectNodes.first(where: { !$0.isPlaying }), let buffer = fanfare(notes: notes, noteDuration: 0.16, volume: 0.11) else { return }
+        node.pan = 0
         node.scheduleBuffer(buffer); node.play()
     }
 
@@ -146,6 +186,7 @@ final class SoundManager {
         }
 
         guard let buffer else { return }
+        node.pan = 0
         node.scheduleBuffer(buffer)
         node.play()
     }
@@ -209,6 +250,75 @@ final class SoundManager {
             let sample = toneSample * 0.75 + filteredNoise * 0.25
             let decayEnvelope = exp(-progress * 4.2)
             channel[index] = sample * beat.volume * decayEnvelope
+        }
+        return buffer
+    }
+
+    private func zombieVoiceSpec(for kind: ZombieKind, moment: ZombieVoiceMoment) -> ZombieVoiceSpec {
+        let base: ZombieVoiceSpec = switch kind {
+        case .walker: ZombieVoiceSpec(fundamental: 78, duration: 0.52, volume: 0.17, pitchSweep: 0.72, noiseMix: 0.28, raspRate: 22, formant: 430)
+        case .runner: ZombieVoiceSpec(fundamental: 118, duration: 0.34, volume: 0.15, pitchSweep: 0.84, noiseMix: 0.34, raspRate: 31, formant: 620)
+        case .brute: ZombieVoiceSpec(fundamental: 54, duration: 0.68, volume: 0.22, pitchSweep: 0.62, noiseMix: 0.30, raspRate: 17, formant: 310)
+        case .crawler: ZombieVoiceSpec(fundamental: 136, duration: 0.30, volume: 0.14, pitchSweep: 1.18, noiseMix: 0.48, raspRate: 39, formant: 760)
+        case .armored: ZombieVoiceSpec(fundamental: 64, duration: 0.48, volume: 0.18, pitchSweep: 0.78, noiseMix: 0.22, raspRate: 19, formant: 350)
+        case .volatile: ZombieVoiceSpec(fundamental: 94, duration: 0.55, volume: 0.18, pitchSweep: 1.28, noiseMix: 0.44, raspRate: 28, formant: 680)
+        case .waitress: ZombieVoiceSpec(fundamental: 154, duration: 0.42, volume: 0.13, pitchSweep: 0.68, noiseMix: 0.36, raspRate: 34, formant: 890)
+        case .riot: ZombieVoiceSpec(fundamental: 59, duration: 0.56, volume: 0.20, pitchSweep: 0.70, noiseMix: 0.25, raspRate: 18, formant: 330)
+        case .groundskeeper: ZombieVoiceSpec(fundamental: 72, duration: 0.52, volume: 0.18, pitchSweep: 0.76, noiseMix: 0.38, raspRate: 24, formant: 470)
+        case .butcher: ZombieVoiceSpec(fundamental: 46, duration: 1.05, volume: 0.25, pitchSweep: 0.52, noiseMix: 0.38, raspRate: 14, formant: 270)
+        case .colossus: ZombieVoiceSpec(fundamental: 36, duration: 1.24, volume: 0.27, pitchSweep: 0.46, noiseMix: 0.42, raspRate: 11, formant: 220)
+        }
+
+        var result = base
+        result.fundamental *= Double.random(in: 0.94...1.06)
+        switch moment {
+        case .spawn:
+            result.duration *= 0.92
+        case .hurt:
+            result.fundamental *= 1.32
+            result.duration *= 0.48
+            result.pitchSweep = 0.66
+            result.volume *= 0.82
+        case .attack:
+            result.fundamental *= 0.88
+            result.duration *= 0.72
+            result.pitchSweep *= 0.82
+            result.volume *= 1.08
+        case .defeat:
+            result.duration *= 0.88
+            result.pitchSweep = min(result.pitchSweep, 0.44)
+            result.noiseMix = min(0.58, result.noiseMix + 0.12)
+        }
+        return result
+    }
+
+    /// Layered, formant-like vocal synthesis. The low oscillator supplies the throat, the
+    /// rectified formant adds a mouth-shaped rasp, and filtered noise keeps it organic.
+    private func zombieVocal(_ spec: ZombieVoiceSpec) -> AVAudioPCMBuffer? {
+        guard let buffer = makeBuffer(duration: spec.duration), let channel = buffer.floatChannelData?[0] else { return nil }
+        let frames = Int(buffer.frameLength)
+        let sampleRate = format.sampleRate
+        let attack = max(1, Int(sampleRate * 0.018))
+        var throatPhase = 0.0
+        var formantPhase = 0.0
+        var filteredNoise: Float = 0
+
+        for index in 0..<frames {
+            let time = Double(index) / sampleRate
+            let progress = Double(index) / Double(frames)
+            let frequency = spec.fundamental * pow(spec.pitchSweep, progress) * (1 + 0.035 * sin(2 * .pi * spec.raspRate * time))
+            throatPhase += 2 * .pi * frequency / sampleRate
+            formantPhase += 2 * .pi * spec.formant * (1 + 0.025 * sin(2 * .pi * 5.2 * time)) / sampleRate
+
+            let throat = Float(sin(throatPhase) + 0.34 * sin(throatPhase * 2.01) + 0.16 * sin(throatPhase * 3.03))
+            let mouth = Float(sin(formantPhase)) * (0.32 + 0.68 * abs(Float(sin(throatPhase))))
+            filteredNoise = filteredNoise * 0.88 + Float.random(in: -1...1) * 0.12
+            let voiced = throat * (1 - spec.noiseMix) + (mouth * 0.42 + filteredNoise * 0.58) * spec.noiseMix
+            let attackEnvelope = index < attack ? Float(index) / Float(attack) : 1
+            let decayEnvelope = Float(pow(1 - progress, 1.35))
+            let tremolo = Float(0.78 + 0.22 * sin(2 * .pi * spec.raspRate * 0.48 * time))
+            let softened = Float(tanh(Double(voiced * 1.45)))
+            channel[index] = softened * spec.volume * attackEnvelope * decayEnvelope * tremolo
         }
         return buffer
     }

@@ -276,6 +276,8 @@ private struct CreditsView: View {
                             .font(.callout).foregroundStyle(.white.opacity(0.64))
                         Text("No artwork, code, characters, names, audio, or levels were copied from another game.")
                             .font(.caption.weight(.bold)).foregroundStyle(.cyan)
+                        Text("Original music was composed with the free, open-source Strudel synthesizer. Zombie vocals are generated in-game from original oscillator and filtered-noise synthesis; no recorded samples are used.")
+                            .font(.caption).foregroundStyle(.white.opacity(0.58))
                         Text("Local diagnostics use Apple MetricKit and never leave the device through the app.")
                             .font(.caption).foregroundStyle(.white.opacity(0.52))
                     }

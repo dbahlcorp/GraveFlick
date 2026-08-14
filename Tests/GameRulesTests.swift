@@ -237,4 +237,12 @@ final class GameRulesTests: XCTestCase {
         ]
         XCTAssertTrue(icons.allSatisfy { UIImage(named: $0) != nil })
     }
+
+    func testAuthoredMusicMastersAreBundled() throws {
+        for name in ["graveflick_menu_theme", "graveflick_gameplay_ambience"] {
+            let url = try XCTUnwrap(Bundle.main.url(forResource: name, withExtension: "wav"), "Missing bundled music master: \(name)")
+            let size = try XCTUnwrap(url.resourceValues(forKeys: [.fileSizeKey]).fileSize)
+            XCTAssertGreaterThan(size, 1_000_000, "Bundled music master is unexpectedly small: \(name)")
+        }
+    }
 }

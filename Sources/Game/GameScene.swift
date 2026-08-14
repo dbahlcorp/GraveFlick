@@ -363,6 +363,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if zombie.damage(damage) {
             defeat(zombie, reason: .impact)
         } else {
+            if Int.random(in: 0..<3) == 0 {
+                SoundManager.shared.playZombieVoice(for: zombie.kind, moment: .hurt, pan: audioPan(for: zombie))
+            }
             zombie.run(.sequence([
                 .wait(forDuration: 0.34),
                 .run { [weak self, weak zombie] in
@@ -526,9 +529,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         world.addChild(zombie)
         if kind.isBoss {
             showBossHUD(for: zombie)
-            SoundManager.shared.play(.bossRoar)
+            SoundManager.shared.playZombieVoice(for: kind, moment: .spawn, pan: audioPan(for: zombie))
             SoundManager.shared.playBossLayer(phase: 1)
-        } else if Int.random(in: 0..<5) == 0 { SoundManager.shared.play(.zombieVoice) }
+        } else if Int.random(in: 0..<4) == 0 {
+            SoundManager.shared.playZombieVoice(for: kind, moment: .spawn, pan: audioPan(for: zombie))
+        }
         zombie.playSpawn(reducedMotion: settings.reducedMotion)
     }
 
@@ -541,6 +546,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func resolveDinerAttack(from zombie: ZombieNode) {
+        SoundManager.shared.playZombieVoice(for: zombie.kind, moment: .attack, pan: audioPan(for: zombie))
         health = level.isSandbox ? health : max(0, health - zombie.kind.dinerDamage)
         combo = 0
         dinerNode?.takeHit(remainingHealth: health, maximumHealth: startingHealth)
@@ -583,6 +589,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             playCombatVFX(.zombieSplatter, at: point, size: zombie.kind.isBoss ? 210 : (zombie.kind == .brute ? 156 : 118), direction: zombie.approachesFromLeft ? -1 : 1)
         }
         SoundManager.shared.play(.defeat, comboScale: combo)
+        if zombie.kind.isBoss || zombie.kind == .brute || zombie.kind == .volatile || Int.random(in: 0..<3) == 0 {
+            SoundManager.shared.playZombieVoice(for: zombie.kind, moment: .defeat, pan: audioPan(for: zombie))
+        }
         runHaptic(.medium)
         showScorePopup(at: point, score: killScore)
         showCombo(at: point)
@@ -600,6 +609,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case .thrownOut: .thrownOut
         case .explosion: .explosion
         }
+    }
+
+    private func audioPan(for zombie: ZombieNode) -> Float {
+        let normalized = (zombie.position.x / max(1, size.width)) * 2 - 1
+        return Float(max(-0.9, min(0.9, normalized)))
     }
 
     private func explodeVolatile(at point: CGPoint) {
