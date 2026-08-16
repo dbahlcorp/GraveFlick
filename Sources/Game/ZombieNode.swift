@@ -27,21 +27,22 @@ enum ZombieKind: String, CaseIterable, Codable {
 
     var assetName: String { rawValue }
 
-    /// Regular kinds are scaled to ~82% of the original art size so they read as smaller than the
-    /// diner instead of rivaling its height — physics bodies, hit-testing, and spawn positioning
-    /// all derive from this, so the shrink stays consistent across visuals and gameplay. Bosses
-    /// (butcher, colossus) keep their full original size — they're supposed to loom over the lot.
+    /// Regular kinds are scaled to ~82% of the original art size, then shrunk again to ~55% of that
+    /// on top (Zombie Smash-style small sprites so the play field reads as much larger) — physics
+    /// bodies, hit-testing, and spawn positioning all derive from this, so the shrink stays
+    /// consistent across visuals and gameplay. Bosses (butcher, colossus) keep their full original
+    /// size — they're supposed to loom over the lot.
     var size: CGSize {
         switch self {
-        case .walker: CGSize(width: 59, height: 92)
-        case .runner: CGSize(width: 59, height: 89)
-        case .brute: CGSize(width: 87, height: 108)
-        case .crawler: CGSize(width: 86, height: 59)
-        case .armored: CGSize(width: 69, height: 98)
-        case .volatile: CGSize(width: 85, height: 103)
-        case .waitress: CGSize(width: 64, height: 95)
-        case .riot: CGSize(width: 75, height: 103)
-        case .groundskeeper: CGSize(width: 72, height: 100)
+        case .walker: CGSize(width: 32, height: 51)
+        case .runner: CGSize(width: 32, height: 49)
+        case .brute: CGSize(width: 48, height: 59)
+        case .crawler: CGSize(width: 47, height: 32)
+        case .armored: CGSize(width: 38, height: 54)
+        case .volatile: CGSize(width: 47, height: 57)
+        case .waitress: CGSize(width: 35, height: 52)
+        case .riot: CGSize(width: 41, height: 57)
+        case .groundskeeper: CGSize(width: 40, height: 55)
         case .butcher: CGSize(width: 142, height: 164)
         case .colossus: CGSize(width: 154, height: 174)
         }

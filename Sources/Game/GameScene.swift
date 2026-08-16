@@ -1147,10 +1147,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }()
         ball.name = WeaponKind.bowlingBall.rawValue
         ball.zPosition = 30
-        // Matches the ~82% shrink applied to ZombieKind.size — a full-size ball rolling through
-        // the now-smaller zombies would be relatively chunkier than intended, hitting more of
-        // each body than the original size ratio called for.
-        ball.physicsBody = SKPhysicsBody(circleOfRadius: 22)
+        // Matches the ~82% shrink, then a further ~55% shrink, applied to ZombieKind.size — a
+        // full-size ball rolling through the now-smaller zombies would be relatively chunkier
+        // than intended, hitting more of each body than the original size ratio called for.
+        ball.physicsBody = SKPhysicsBody(circleOfRadius: 12)
         ball.physicsBody?.mass = 3.5
         ball.physicsBody?.restitution = 0.32
         ball.physicsBody?.friction = 0.7
@@ -1453,10 +1453,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let rawLength = max(1, hypot(raw.dx, raw.dy))
         let unit = CGVector(dx: raw.dx / rawLength, dy: raw.dy / rawLength)
         let lineEnd = CGPoint(x: origin.x + unit.dx * size.width * 1.6, y: origin.y + unit.dy * size.width * 1.6)
-        // Matches the ~82% shrink applied to ZombieKind.size, so the pierce band still tracks
-        // roughly one body-width instead of becoming relatively wider than the zombies it's
-        // testing against.
-        let tolerance: CGFloat = 21
+        // Matches the ~82% shrink, then a further ~55% shrink, applied to ZombieKind.size, so the
+        // pierce band still tracks roughly one body-width instead of becoming relatively wider
+        // than the zombies it's testing against.
+        let tolerance: CGFloat = 12
 
         let pierced = activeZombies.filter { !$0.isDefeated }.compactMap { zombie -> (zombie: ZombieNode, along: CGFloat)? in
             let toZombie = CGVector(dx: zombie.position.x - origin.x, dy: zombie.position.y - origin.y)
