@@ -66,7 +66,7 @@ enum WeaponKind: String, CaseIterable, Codable, Identifiable {
         case .greaseFire: "weapon_grease_fire"
         case .transformer: "weapon_transformer"
         case .deliveryTruck: "weapon_delivery_truck"
-        case .meteor: "weapon_airstrike_beacon"
+        case .meteor: "weapon_meteor"
         }
     }
     var cooldown: TimeInterval {

@@ -1559,8 +1559,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func dropMeteor(at target: CGPoint) {
-        let meteor = SKSpriteNode(texture: WeaponKind.anvil.authoredTexture, size: CGSize(width: 110, height: 92))
-        meteor.color = .orange; meteor.colorBlendFactor = 0.55
+        // Frame 1's rock sits toward the streak's leading (lower-right) end, not canvas center —
+        // anchoring there instead of (0.5, 0.5) keeps the actual rock tracking toward `target`
+        // instead of the mostly-empty tail padding.
+        let meteor = SKSpriteNode(texture: EquipmentArt.meteor.actionFrames[0], size: CGSize(width: 150, height: 150))
+        meteor.anchorPoint = CGPoint(x: 0.75, y: 0.32)
+        meteor.xScale = -1 // art's nose points down-right; flight path here always goes down-left
         meteor.position = CGPoint(x: target.x + 160, y: size.height + 80)
         meteor.zPosition = 140
         world.addChild(meteor)
@@ -1590,9 +1594,32 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func resolveMeteorImpact(at target: CGPoint) {
+        playMeteorImpactArt(at: target)
         // Bigger radial impulse than a grenade/propane blast, matching the "enormous physics
         // impulse" this weapon is meant for.
         throwExplosive(at: target, radius: 260, damage: 10, maxImpulse: 640, minImpulse: 220)
+    }
+
+    /// Bespoke impact-flash-to-smoke-cloud sequence layered on top of the generic radial
+    /// `.explosion` VFX every other explosive weapon shares — the meteor art was authored with
+    /// its own distinct look, so it gets its own frames instead of just the shared procedural one.
+    /// Both frames are composed with their ground contact at the very bottom of the canvas, so a
+    /// bottom-center anchor keeps the explosion rooted at `target` instead of floating around it.
+    private func playMeteorImpactArt(at target: CGPoint) {
+        let impact = SKSpriteNode(texture: EquipmentArt.meteor.actionFrames[1], size: CGSize(width: 280, height: 280))
+        impact.anchorPoint = CGPoint(x: 0.5, y: 0)
+        impact.position = target
+        impact.zPosition = 135
+        impact.alpha = 0
+        world.addChild(impact)
+        impact.run(.sequence([
+            .group([.fadeIn(withDuration: 0.05), .scale(to: 1.1, duration: 0.12)]),
+            .wait(forDuration: 0.10),
+            .run { impact.texture = EquipmentArt.meteor.actionFrames[2] },
+            .wait(forDuration: 0.26),
+            .fadeOut(withDuration: 0.30),
+            .removeFromParent()
+        ]))
     }
 
     private func spawnPhysicsDebris(from zombie: ZombieNode, reason: DefeatReason) {

@@ -4,6 +4,7 @@ enum EquipmentArt: String, CaseIterable {
     case bowlingBall = "weapon_bowling_ball"
     case scatterblast = "weapon_scatterblast"
     case airstrikeBeacon = "weapon_airstrike_beacon"
+    case meteor = "weapon_meteor"
     case spikeStrip = "trap_spike_strip"
     case flashFreezer = "trap_flash_freezer"
 
@@ -39,7 +40,8 @@ extension WeaponKind {
         case .bowlingBall: .bowlingBall
         case .shotgun: .scatterblast
         case .airstrike: .airstrikeBeacon
-        case .anvil, .grenade, .propaneTank, .wreckingBall, .sniper, .greaseFire, .transformer, .deliveryTruck, .meteor: .bowlingBall
+        case .meteor: .meteor
+        case .anvil, .grenade, .propaneTank, .wreckingBall, .sniper, .greaseFire, .transformer, .deliveryTruck: .bowlingBall
         }
     }
 
