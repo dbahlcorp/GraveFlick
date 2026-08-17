@@ -16,6 +16,7 @@ struct GameHUDSnapshot {
     let waveStatus: String
     let waveStatusHighlighted: Bool
     let health: Int
+    let maximumHealth: Int
     let specialCharge: Double
     let weaponCooldowns: [WeaponKind: TimeInterval]
     let trapCooldowns: [TrapKind: TimeInterval]
@@ -105,7 +106,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private let bossHealthFill = SKShapeNode(rectOf: CGSize(width: 260, height: 12), cornerRadius: 6)
     private let bossNameLabel = SKLabelNode(fontNamed: "AvenirNext-Heavy")
 
-    private var startingHealth: Int { level.isSandbox ? 99 : (level.modifier == .suddenDeath ? 1 : GameRules.startingHealth + progress.upgradeLevel(.reinforcedDiner)) }
+    // 9_999, not 99: with the numeric health pool a fully upgraded diner's real max (up to 160)
+    // could otherwise exceed sandbox's old "effectively unlimited" value.
+    private var startingHealth: Int { level.isSandbox ? 9_999 : (level.modifier == .suddenDeath ? 1 : GameRules.startingHealth + progress.upgradeLevel(.reinforcedDiner) * GameRules.reinforcedDinerHealthPerLevel) }
     private var flickMultiplier: CGFloat { 1 + CGFloat(progress.upgradeLevel(.flickTraining)) * 0.10 }
     private var rapidGearLevel: Int { progress.upgradeLevel(.rapidGear) }
     private var groundY: CGFloat { max(70, size.height * 0.13) }
@@ -122,7 +125,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         self.level = level
         self.progress = progress
         self.settings = settings
-        health = level.isSandbox ? 99 : (level.modifier == .suddenDeath ? 1 : GameRules.startingHealth + progress.upgradeLevel(.reinforcedDiner))
+        health = level.isSandbox ? 9_999 : (level.modifier == .suddenDeath ? 1 : GameRules.startingHealth + progress.upgradeLevel(.reinforcedDiner) * GameRules.reinforcedDinerHealthPerLevel)
         super.init(size: size)
         scaleMode = .resizeFill
     }
@@ -1898,7 +1901,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                     showScorePopup(at: location, score: 75)
                     return true
                 } else if current.name == "pickup-repair" {
-                    health = min(startingHealth, health + 1)
+                    health = min(startingHealth, health + GameRules.repairPickupAmount)
                     SoundManager.shared.updateGameplayMix(wave: wave, healthFraction: CGFloat(health) / CGFloat(max(1, startingHealth)))
                     current.removeFromParent()
                     SoundManager.shared.play(.pickup)
@@ -1919,6 +1922,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             waveStatus: waveStatus,
             waveStatusHighlighted: waveStatusHighlighted,
             health: health,
+            maximumHealth: startingHealth,
             specialCharge: specialCharge,
             weaponCooldowns: weaponCooldowns,
             trapCooldowns: trapCooldowns,

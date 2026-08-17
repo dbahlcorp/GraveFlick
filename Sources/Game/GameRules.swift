@@ -2,7 +2,14 @@ import CoreGraphics
 import Foundation
 
 enum GameRules {
-    static let startingHealth = 5
+    // Numeric health pool, not hearts — with zombies attacking the diner repeatedly instead of
+    // dying on contact (see ZombieNode.playDinerAttack), a handful of discrete hearts drained in
+    // one bite each, doesn't leave enough resolution: one ignored zombie could end a run in a few
+    // seconds. A bigger pool with proportionally small per-bite damage (ZombieKind.dinerDamage)
+    // keeps a few seconds of inattention recoverable while sustained neglect still adds up fast.
+    static let startingHealth = 100
+    static let reinforcedDinerHealthPerLevel = 20
+    static let repairPickupAmount = 20
     static let maximumFlickSpeed: CGFloat = 2_200
 
     static func score(for kind: ZombieKind, combo: Int) -> Int {

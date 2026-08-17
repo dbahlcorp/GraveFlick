@@ -124,10 +124,13 @@ enum ZombieKind: String, CaseIterable, Codable {
         }
     }
 
+    /// Scaled for GameRules.startingHealth's numeric pool (100), not the old 5-heart scale —
+    /// small relative to the pool since bites repeat every ~1.1s (see playDinerAttack) rather
+    /// than being a single hit that ends the zombie.
     var dinerDamage: Int {
-        if self == .butcher { return 3 }
-        if self == .colossus { return 4 }
-        return self == .brute || self == .volatile || self == .groundskeeper ? 2 : 1
+        if self == .butcher { return 14 }
+        if self == .colossus { return 20 }
+        return self == .brute || self == .volatile || self == .groundskeeper ? 8 : 4
     }
 
     var throwResistance: CGFloat {

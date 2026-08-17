@@ -157,7 +157,7 @@ enum UpgradeKind: String, CaseIterable, Codable, Identifiable {
     }
     var detail: String {
         switch self {
-        case .reinforcedDiner: "+1 diner heart per level"
+        case .reinforcedDiner: "+20 diner health per level"
         case .flickTraining: "+10% throw power per level"
         case .rapidGear: "-8% weapon cooldown per level"
         }

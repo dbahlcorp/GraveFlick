@@ -47,6 +47,7 @@ final class GameSessionModel: ObservableObject, GameSceneDelegate, Identifiable 
     @Published private(set) var waveStatus = "WAVE 1"
     @Published private(set) var waveStatusHighlighted = false
     @Published private(set) var health = GameRules.startingHealth
+    @Published private(set) var maximumHealth = GameRules.startingHealth
     @Published private(set) var specialCharge = 0.0
     @Published private(set) var weaponCooldowns: [WeaponKind: TimeInterval] = [:]
     @Published private(set) var trapCooldowns: [TrapKind: TimeInterval] = [:]
@@ -65,7 +66,8 @@ final class GameSessionModel: ObservableObject, GameSceneDelegate, Identifiable 
         self.progress = progress
         self.completion = completion
         showsTutorial = !progress.hasSeenTutorial
-        health = level.isSandbox ? 99 : (level.modifier == .suddenDeath ? 1 : GameRules.startingHealth + progress.upgradeLevel(.reinforcedDiner))
+        health = level.isSandbox ? 9_999 : (level.modifier == .suddenDeath ? 1 : GameRules.startingHealth + progress.upgradeLevel(.reinforcedDiner) * GameRules.reinforcedDinerHealthPerLevel)
+        maximumHealth = health
         scene = GameScene(level: level, progress: progress, settings: settings, size: CGSize(width: 1194, height: 834))
         scene.gameDelegate = self
         if showsTutorial { scene.isGameplayPaused = true }
@@ -77,6 +79,7 @@ final class GameSessionModel: ObservableObject, GameSceneDelegate, Identifiable 
         waveStatus = snapshot.waveStatus
         waveStatusHighlighted = snapshot.waveStatusHighlighted
         health = snapshot.health
+        maximumHealth = snapshot.maximumHealth
         specialCharge = snapshot.specialCharge
         weaponCooldowns = snapshot.weaponCooldowns
         trapCooldowns = snapshot.trapCooldowns
@@ -659,9 +662,12 @@ private struct GameContainerView: View {
                 .id(session.id)
                 .ignoresSafeArea()
 
-            // <= 2, not == 1: a Brute/Volatile deals 2 diner damage in one hit (ZombieKind.dinerDamage),
-            // so health can jump straight from 2 to 0 without ever passing through 1.
-            if session.health > 0, session.health <= 2, session.result == nil { lowHealthVignette }
+            // Ratio-based, not a fixed point count: health is a numeric pool now (GameRules
+            // .startingHealth), scaled up from the old 5-heart system, so a fixed threshold
+            // wouldn't track proportionally across sandbox/upgraded maximums. max(2, ...) keeps
+            // suddenDeath (maximumHealth == 1) warning for its entire single-hit duration, same
+            // as before this pool existed.
+            if session.health > 0, CGFloat(session.health) <= max(2, CGFloat(session.maximumHealth) * 0.2), session.result == nil { lowHealthVignette }
 
             VStack(spacing: 0) {
                 gameplayHUD
@@ -728,7 +734,7 @@ private struct GameContainerView: View {
             .accessibilityLabel("Pause night")
             stat("SCORE", "\(session.score)", icon: "ui_star", color: .yellow)
             stat("WAVE", session.level.isEndless ? "\(session.wave)" : "\(session.wave)/\(session.level.totalWaves)", icon: "ui_moon", color: .cyan)
-            stat("DINER", String(repeating: "♥", count: session.health), icon: "ui_heart", color: .red)
+            stat("DINER", "\(session.health)/\(session.maximumHealth)", icon: "ui_heart", color: .red)
             Spacer()
             Button { session.useSpecial() } label: {
                 HStack(spacing: 7) {
