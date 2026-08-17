@@ -980,7 +980,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func spawnZombie(forceWalker: Bool, bossKind: ZombieKind? = nil, forcedKind: ZombieKind? = nil) {
         let unlockedCount = min(level.enemyRoster.count, max(1, 1 + wave))
         let roster = Array(level.enemyRoster.prefix(unlockedCount))
-        let kind = forcedKind ?? bossKind ?? (level.modifier == .volatileRush ? .volatile : (level.modifier == .waitressRush ? .waitress : (forceWalker ? (roster.contains(.walker) ? ZombieKind.walker : roster[0]) : roster.randomElement()!)))
+        // `roster` is empty only if a level is ever authored with an empty (or off-by-one-sliced)
+        // enemyRoster — falls back to `.walker` instead of crashing on a force-unwrap/index.
+        let kind = forcedKind ?? bossKind ?? (level.modifier == .volatileRush ? .volatile : (level.modifier == .waitressRush ? .waitress : (forceWalker ? (roster.contains(.walker) ? ZombieKind.walker : roster.first ?? .walker) : roster.randomElement() ?? .walker)))
         let fromLeft: Bool
         switch level.modifier {
         case .leftOnly: fromLeft = true
@@ -1215,7 +1217,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let range = scatterblastRange
         let texture = SKTexture(imageNamed: "weapon_scatterblast_pellets")
         let aspect = texture.size().height / max(1, texture.size().width)
-        let pellets = SKSpriteNode(texture: texture, size: CGSize(width: 150, height: 150 * aspect))
+        // Scales with `scatterblastRange` (itself screen-width-based) instead of a fixed size, so
+        // the blast reads proportionally the same on a small phone and a wide iPad rather than
+        // looking oversized or tiny relative to the cone it's actually covering.
+        let width = min(220, max(90, range * 0.3))
+        let pellets = SKSpriteNode(texture: texture, size: CGSize(width: width, height: width * aspect))
         pellets.position = CGPoint(x: origin.x + cos(angle) * range * 0.3, y: origin.y + sin(angle) * range * 0.3)
         pellets.zRotation = angle
         pellets.zPosition = 133

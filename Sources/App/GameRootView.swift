@@ -353,6 +353,7 @@ private struct LevelSelectView: View {
         NightBackground {
             VStack(spacing: 10) {
                 ScreenHeader(title: "NIGHT ROUTE", subtitle: "Twenty-five shifts across eight haunted stops.") { model.screen = .menu }
+                ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 16) {
                         ForEach(GameLevel.campaign) { level in
@@ -401,6 +402,12 @@ private struct LevelSelectView: View {
                         }
                     }
                     .padding(.horizontal, 4)
+                    .id("leading")
+                }
+                // A ScrollView's initial content offset isn't reliably (0, 0) on first
+                // appearance in every case — force it to the leading edge so the route always
+                // opens on Night 1 instead of wherever it happened to land.
+                .onAppear { proxy.scrollTo("leading", anchor: .leading) }
                 }
             }
             .padding(18)

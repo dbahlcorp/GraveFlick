@@ -21,7 +21,11 @@ enum GameRules {
     }
 
     static func campaignSpawnCount(wave: Int, waveDuration: TimeInterval, baseSpawnInterval: TimeInterval) -> Int {
-        let baseline = Int((waveDuration / max(0.45, baseSpawnInterval)) * 0.55)
+        // Nudged up from 0.55 to compensate for the slower global zombie walk speed
+        // (GameScene.zombieSpeedScale) — each zombie now spends longer crossing the screen, so
+        // spawning a bit more densely keeps overall wave pressure roughly where it was. This is
+        // an estimate, not a measured value; revisit after a playtest pass.
+        let baseline = Int((waveDuration / max(0.45, baseSpawnInterval)) * 0.60)
         return min(14, max(5, baseline + max(0, wave - 1)))
     }
 
@@ -44,7 +48,10 @@ enum GameRules {
         let safeWave = max(1, wave)
         let tier = (safeWave - 1) / 5
         return SurvivalDifficulty(
-            spawnInterval: max(0.34, baseSpawnInterval - Double(safeWave - 1) * 0.035),
+            // *0.92 compensates for the slower global zombie walk speed (see
+            // GameScene.zombieSpeedScale) — an estimate to revisit after playtesting, not a
+            // measured value.
+            spawnInterval: max(0.34, (baseSpawnInterval - Double(safeWave - 1) * 0.035) * 0.92),
             speedMultiplier: min(2.25, 1 + CGFloat(safeWave - 1) * 0.028),
             healthMultiplier: min(3.5, 1 + CGFloat(tier) * 0.18),
             spawnCount: min(3, 1 + tier / 3),
