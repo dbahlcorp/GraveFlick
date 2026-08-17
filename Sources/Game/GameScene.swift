@@ -1203,33 +1203,24 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         return delta
     }
 
-    /// Visible pellet fan reading as a shotgun blast out of the defender's window, fanned around
-    /// the aimed direction so the shot itself is legible instead of looking like an unexplained
-    /// shockwave.
+    /// Authored pellet-cluster sprite reading as a shotgun blast out of the defender's window,
+    /// rotated to the aimed direction and shot outward along it so the blast itself is legible
+    /// instead of looking like an unexplained shockwave.
     private func fireBuckshotSpread(from origin: CGPoint, angle: CGFloat) {
         guard settings.flashesEnabled else { return }
-        let pelletCount = 9
         let range = scatterblastRange
-        for index in 0..<pelletCount {
-            let spread = (CGFloat(index) / CGFloat(pelletCount - 1)) - 0.5
-            let pelletAngle = angle + spread * scatterblastHalfAngle * 2
-            let distance = range * CGFloat.random(in: 0.72...1)
-            let end = CGPoint(x: origin.x + cos(pelletAngle) * distance, y: origin.y + sin(pelletAngle) * distance)
-            let path = CGMutablePath()
-            path.move(to: origin)
-            path.addLine(to: end)
-            let pellet = SKShapeNode(path: path)
-            pellet.strokeColor = SKColor(red: 1, green: 0.86, blue: 0.42, alpha: 0.82)
-            pellet.lineWidth = settings.reducedMotion ? 1.5 : 2.5
-            pellet.glowWidth = settings.reducedMotion ? 0 : 3
-            pellet.zPosition = 133
-            world.addChild(pellet)
-            pellet.run(.sequence([
-                .wait(forDuration: Double(index) * 0.006),
-                .fadeOut(withDuration: 0.10),
-                .removeFromParent()
-            ]))
-        }
+        let texture = SKTexture(imageNamed: "weapon_scatterblast_pellets")
+        let aspect = texture.size().height / max(1, texture.size().width)
+        let pellets = SKSpriteNode(texture: texture, size: CGSize(width: 150, height: 150 * aspect))
+        pellets.position = CGPoint(x: origin.x + cos(angle) * range * 0.3, y: origin.y + sin(angle) * range * 0.3)
+        pellets.zRotation = angle
+        pellets.zPosition = 133
+        world.addChild(pellets)
+        let travel = CGVector(dx: cos(angle) * range * 0.62, dy: sin(angle) * range * 0.62)
+        pellets.run(.sequence([
+            .group([.move(by: travel, duration: settings.reducedMotion ? 0.08 : 0.14), .fadeOut(withDuration: settings.reducedMotion ? 0.08 : 0.14)]),
+            .removeFromParent()
+        ]))
     }
 
     /// Impact count/spacing scale with the painted swipe's length (2–5 impacts) instead of the
@@ -1362,7 +1353,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             tank.removeFromParent()
         }
         detonatables[key] = Detonatable(node: tank, detonate: detonate)
-        world.addChild(tank)
         tank.run(.sequence([.wait(forDuration: 2.2), .run { [weak self] in
             self?.detonatables.removeValue(forKey: key)
             detonate()
