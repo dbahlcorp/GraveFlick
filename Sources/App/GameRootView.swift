@@ -676,7 +676,8 @@ private struct GameContainerView: View {
                 actionBar
             }
             .padding(.horizontal, 18)
-            .padding(.vertical, 12)
+            .padding(.top, 12)
+            .padding(.bottom, 2)
 
             if session.showsTutorial { tutorial }
             if session.isPaused {

@@ -87,6 +87,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var spawningFinished = false
     private var didBuildWorld = false
     private var spawnedBossWaves: Set<Int> = []
+    /// Global walk-speed tuning knob, layered under every other speed multiplier (difficulty,
+    /// wave ramp, sandbox slider) so it scales zombies uniformly without touching their relative
+    /// per-kind balance.
+    private let zombieSpeedScale: CGFloat = 0.85
     private var sandboxSpeed: CGFloat = 1
     private var sandboxSpawnBurst = 1
     private var sandboxDefeats = 0
@@ -990,7 +994,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let zombie = ZombieNode(
             kind: kind,
             approachesFromLeft: fromLeft,
-            movementMultiplier: (difficulty?.speedMultiplier ?? 1) * settings.difficulty.enemySpeed * (level.isSandbox ? sandboxSpeed : 1),
+            movementMultiplier: zombieSpeedScale * (difficulty?.speedMultiplier ?? 1) * settings.difficulty.enemySpeed * (level.isSandbox ? sandboxSpeed : 1),
             healthMultiplier: (difficulty?.healthMultiplier ?? 1) * settings.difficulty.enemyHealth,
             dismembermentEnabled: settings.goreEnabled
         )
