@@ -195,10 +195,14 @@ enum ZombieAnimationState: CaseIterable, Equatable {
     case recovering
     case frozen
     case defeated
+    /// Parked at the diner between bites — not moving, waiting out `dinerAttackCooldown` before
+    /// the next `playDinerAttack`. Distinct from `.attacking`, which is only the bite animation
+    /// itself, so the zombie stays alive and attackable until the player actually kills it.
+    case holdingAtDiner
 }
 
 enum ZombieDefeatStyle {
-    case pavement, collision, weapon, trap, thrownOut, explosion, dinerAttack
+    case pavement, collision, weapon, trap, thrownOut, explosion
 }
 
 final class ZombieNode: SKNode {
@@ -231,6 +235,7 @@ final class ZombieNode: SKNode {
     private var recoveryTime: TimeInterval = 0
     private var hitReactionTime: TimeInterval = 0
     private var damageProtectionRemaining: TimeInterval = 0
+    private var dinerAttackCooldown: TimeInterval = 0
     private var hasTakenOrdinaryHit = false
     private(set) var severedLimbCount = 0
     private var severedParts: Set<RigPart> = []
@@ -404,6 +409,7 @@ final class ZombieNode: SKNode {
         if slowTime > 0 { slowTime -= deltaTime }
         if hitReactionTime > 0 { hitReactionTime -= deltaTime }
         if damageProtectionRemaining > 0 { damageProtectionRemaining -= deltaTime }
+        if dinerAttackCooldown > 0 { dinerAttackCooldown -= deltaTime }
         guard !isDefeated else { return }
         abilityTime += deltaTime
         if kind == .waitress, abilityTime >= 2.4, state == .walking {
@@ -434,7 +440,7 @@ final class ZombieNode: SKNode {
 
         // Frozen-solid zombies are dynamic physics bodies now (see freezeSolid) — gravity and
         // collisions drive position, not the manual walk-cycle code below.
-        if state == .impact || state == .attacking || state == .frozen { return }
+        if state == .impact || state == .attacking || state == .frozen || state == .holdingAtDiner { return }
         if state == .recovering {
             recoveryTime -= deltaTime
             if recoveryTime <= 0 {
@@ -613,7 +619,10 @@ final class ZombieNode: SKNode {
         physicsBody?.affectedByGravity = false
         physicsBody?.velocity = .zero
         physicsBody?.angularVelocity = 0
-        position.y = max(position.y, groundY + kind.size.height * 0.39 + 2)
+        // Unconditional, not max(position.y, ...): physics is disabled right after this and never
+        // touches position.y again until the next throw, so if the impact bounce left the zombie
+        // still elevated when this fires, max() would let it walk stuck at that height forever.
+        position.y = groundY + kind.size.height * 0.39 + 2
         shadowNode.alpha = 1
         rig.removeAction(forKey: "impact")
         rig.run(.group([
@@ -644,16 +653,20 @@ final class ZombieNode: SKNode {
         ]), withKey: "spawn")
     }
 
+    /// Zombie Smash-style: reaching the diner doesn't kill the zombie, it starts a repeating bite
+    /// loop (paced by `dinerAttackCooldown`) that only stops when the player actually kills it —
+    /// see `resolveDinerAttack` in GameScene, which no longer calls `playDefeat` after a hit.
     @discardableResult
     func playDinerAttack(reducedMotion: Bool, completion: @escaping () -> Void) -> Bool {
-        guard !isDefeated, state != .attacking else { return false }
+        guard !isDefeated, state != .attacking, dinerAttackCooldown <= 0 else { return false }
         state = .attacking
+        dinerAttackCooldown = 1.1
         physicsBody?.isDynamic = false
         physicsBody?.velocity = .zero
         let direction: CGFloat = approachesFromLeft ? 1 : -1
 
         if reducedMotion {
-            run(.sequence([.wait(forDuration: 0.12), .run(completion)]), withKey: "dinerAttack")
+            run(.sequence([.wait(forDuration: 0.12), .run { [weak self] in self?.state = .holdingAtDiner; completion() }]), withKey: "dinerAttack")
             return true
         }
 
@@ -708,7 +721,7 @@ final class ZombieNode: SKNode {
                       .group([.moveBy(x: direction * 20, y: 2, duration: 0.08), .rotate(toAngle: direction * 0.12, duration: 0.08)]),
                       .group([.moveBy(x: -direction * 13, y: -2, duration: 0.10), .rotate(toAngle: 0, duration: 0.10)])]
         }
-        rig.run(.sequence(attack + [.run(completion)]), withKey: "dinerAttack")
+        rig.run(.sequence(attack + [.run { [weak self] in self?.state = .holdingAtDiner; completion() }]), withKey: "dinerAttack")
         return true
     }
 
@@ -910,7 +923,6 @@ final class ZombieNode: SKNode {
             let styleDirection: CGFloat = switch style {
             case .thrownOut: approachesFromLeft ? 1 : -1
             case .collision: index.isMultiple(of: 2) ? -1 : 1
-            case .dinerAttack: approachesFromLeft ? -0.5 : 0.5
             default: index.isMultiple(of: 2) ? 1 : -1
             }
             let kindForce: CGFloat = switch kind {
@@ -927,7 +939,6 @@ final class ZombieNode: SKNode {
             case .explosion: 1.9
             case .weapon: 1.45
             case .trap: 0.72
-            case .dinerAttack: 0.45
             default: 1
             }
             let force = kindForce * styleForce

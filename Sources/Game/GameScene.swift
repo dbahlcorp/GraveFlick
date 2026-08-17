@@ -1045,11 +1045,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             bossPhase: zombie.kind.isBoss ? zombie.bossPhase : 0
         )
         runHaptic(.heavy)
-        zombie.playDefeat(style: .dinerAttack, reducedMotion: settings.reducedMotion) {}
-        if zombie.kind.isBoss {
-            bossHUD.isHidden = true
-            SoundManager.shared.updateGameplayMix(wave: wave, healthFraction: CGFloat(health) / CGFloat(max(1, startingHealth)))
-        }
+        // Zombie Smash-style: a diner hit no longer kills the zombie — it stays parked at the
+        // house and keeps biting (see ZombieNode.playDinerAttack's cooldown loop) until the
+        // player actually kills it via grab/throw, a weapon, or a trap.
         if health == 0 { finish(won: false) }
     }
 

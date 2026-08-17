@@ -1271,7 +1271,11 @@ private struct ModalCard<Content: View>: View {
                         card
                         Spacer(minLength: 0)
                     }
-                    .frame(minHeight: proxy.size.height)
+                    // maxWidth: .infinity makes the VStack claim the ScrollView's full width so its
+                    // own centered alignment can center `card` horizontally — the vertical Spacers
+                    // only ever flexed along the VStack's own axis, so without this the VStack just
+                    // hugged the card's width and ScrollView left-aligned it instead of centering.
+                    .frame(maxWidth: .infinity, minHeight: proxy.size.height)
                 }
             }
         }
