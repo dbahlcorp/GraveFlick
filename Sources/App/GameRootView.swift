@@ -295,42 +295,49 @@ private struct CreditsView: View {
                 ScreenHeader(title: "CREDITS & ACHIEVEMENTS", subtitle: "An original midnight survival comedy") { model.screen = .menu }
                 // The achievements column (9 fixed-height rows) can outgrow a landscape phone's
                 // vertical space on its own — scroll the whole content area rather than clip it.
-                ScrollView(showsIndicators: false) {
-                    HStack(alignment: .top, spacing: 22) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("CREATED BY DBAHLCORP").font(.headline.weight(.black))
-                            Text("Design, gameplay, SwiftUI and SpriteKit implementation built for GraveFlick. Original character and App Store artwork generated specifically for this project with OpenAI image generation and integrated into the runtime.")
-                                .font(.callout).foregroundStyle(.white.opacity(0.64))
-                            Text("No artwork, code, characters, names, audio, or levels were copied from another game.")
-                                .font(.caption.weight(.bold)).foregroundStyle(.cyan)
-                            Text("Original music was composed with the free, open-source Strudel synthesizer. Zombie vocals are generated in-game from original oscillator and filtered-noise synthesis; no recorded samples are used.")
-                                .font(.caption).foregroundStyle(.white.opacity(0.58))
-                            Text("Local diagnostics use Apple MetricKit and never leave the device through the app.")
-                                .font(.caption).foregroundStyle(.white.opacity(0.52))
-                        }
-                        .padding(20)
-                        .frame(maxWidth: 430, alignment: .leading)
-                        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 20))
-
-                        VStack(spacing: 8) {
-                            ForEach(achievements, id: \.0) { item in
-                                let unlocked = store.progress.achievements.contains(item.0)
-                                HStack {
-                                    RoadsideIcon(imageName: unlocked ? "ui_achievement" : "ui_lock", color: unlocked ? .yellow : .gray)
-                                    VStack(alignment: .leading) {
-                                        Text(item.1).font(.subheadline.weight(.black))
-                                        Text(item.2).font(.caption2).foregroundStyle(.white.opacity(0.55))
-                                    }
-                                    Spacer()
-                                    Text(unlocked ? "+100" : "—").font(.caption.weight(.black)).foregroundStyle(.cyan)
-                                }
-                                .padding(.horizontal, 14)
-                                .frame(height: 52)
-                                .background(Color.white.opacity(unlocked ? 0.09 : 0.045), in: RoundedRectangle(cornerRadius: 14))
+                ScrollViewReader { proxy in
+                    ScrollView(showsIndicators: false) {
+                        HStack(alignment: .top, spacing: 22) {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("CREATED BY DBAHLCORP").font(.headline.weight(.black))
+                                Text("Design, gameplay, SwiftUI and SpriteKit implementation built for GraveFlick. Original character and App Store artwork generated specifically for this project with OpenAI image generation and integrated into the runtime.")
+                                    .font(.callout).foregroundStyle(.white.opacity(0.64))
+                                Text("No artwork, code, characters, names, audio, or levels were copied from another game.")
+                                    .font(.caption.weight(.bold)).foregroundStyle(.cyan)
+                                Text("Original music was composed with the free, open-source Strudel synthesizer. Zombie vocals are generated in-game from original oscillator and filtered-noise synthesis; no recorded samples are used.")
+                                    .font(.caption).foregroundStyle(.white.opacity(0.58))
+                                Text("Local diagnostics use Apple MetricKit and never leave the device through the app.")
+                                    .font(.caption).foregroundStyle(.white.opacity(0.52))
                             }
+                            .padding(20)
+                            .frame(maxWidth: 430, alignment: .leading)
+                            .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 20))
+
+                            VStack(spacing: 8) {
+                                ForEach(achievements, id: \.0) { item in
+                                    let unlocked = store.progress.achievements.contains(item.0)
+                                    HStack {
+                                        RoadsideIcon(imageName: unlocked ? "ui_achievement" : "ui_lock", color: unlocked ? .yellow : .gray)
+                                        VStack(alignment: .leading) {
+                                            Text(item.1).font(.subheadline.weight(.black))
+                                            Text(item.2).font(.caption2).foregroundStyle(.white.opacity(0.55))
+                                        }
+                                        Spacer()
+                                        Text(unlocked ? "+100" : "—").font(.caption.weight(.black)).foregroundStyle(.cyan)
+                                    }
+                                    .padding(.horizontal, 14)
+                                    .frame(height: 52)
+                                    .background(Color.white.opacity(unlocked ? 0.09 : 0.045), in: RoundedRectangle(cornerRadius: 14))
+                                }
+                            }
+                            .frame(maxWidth: 440)
                         }
-                        .frame(maxWidth: 440)
+                        .id("top")
                     }
+                    // A ScrollView's initial content offset isn't reliably (0, 0) on first
+                    // appearance in every case — force it, or this can open already scrolled
+                    // past the header, leaving no visible way back to the menu.
+                    .onAppear { proxy.scrollTo("top", anchor: .top) }
                 }
             }
             .padding(32)
@@ -346,6 +353,7 @@ private struct LevelSelectView: View {
         NightBackground {
             VStack(spacing: 10) {
                 ScreenHeader(title: "NIGHT ROUTE", subtitle: "Twenty-five shifts across eight haunted stops.") { model.screen = .menu }
+                ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 16) {
                         ForEach(GameLevel.campaign) { level in
@@ -394,6 +402,12 @@ private struct LevelSelectView: View {
                         }
                     }
                     .padding(.horizontal, 4)
+                    .id("leading")
+                }
+                // A ScrollView's initial content offset isn't reliably (0, 0) on first
+                // appearance in every case — force it to the leading edge so the route always
+                // opens on Night 1 instead of wherever it happened to land.
+                .onAppear { proxy.scrollTo("leading", anchor: .leading) }
                 }
             }
             .padding(18)
@@ -408,21 +422,28 @@ private struct ChallengeSelectView: View {
         NightBackground {
             VStack(spacing: 12) {
                 ScreenHeader(title: "BONUS NIGHTS", subtitle: "Fifteen original rule-bending shifts") { model.screen = .menu }
-                ScrollView {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 205), spacing: 12)], spacing: 12) {
-                        ForEach(GameLevel.challenges) { level in
-                            Button { model.start(level) } label: {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    Text(level.title).font(.headline.weight(.black))
-                                    Text(level.modifier.title).font(.caption).foregroundStyle(.cyan)
-                                    Text("4 WAVES • +\(level.reward) COINS").font(.caption2.weight(.black)).foregroundStyle(.white.opacity(0.55))
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading).padding(16)
-                                .background(Color.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 16))
-                                .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.orange.opacity(0.45)))
-                            }.buttonStyle(.plain)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 205), spacing: 12)], spacing: 12) {
+                            ForEach(GameLevel.challenges) { level in
+                                Button { model.start(level) } label: {
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        Text(level.title).font(.headline.weight(.black))
+                                        Text(level.modifier.title).font(.caption).foregroundStyle(.cyan)
+                                        Text("4 WAVES • +\(level.reward) COINS").font(.caption2.weight(.black)).foregroundStyle(.white.opacity(0.55))
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading).padding(16)
+                                    .background(Color.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 16))
+                                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.orange.opacity(0.45)))
+                                }.buttonStyle(.plain)
+                            }
                         }
+                        .id("top")
                     }
+                    // A ScrollView's initial content offset isn't reliably (0, 0) on first
+                    // appearance in every case — force it, or a tall grid can open already
+                    // scrolled past the header, leaving no visible way back to the menu.
+                    .onAppear { proxy.scrollTo("top", anchor: .top) }
                 }
             }.padding(24)
         }
@@ -437,24 +458,31 @@ private struct UpgradeShopView: View {
         NightBackground {
             VStack(spacing: 16) {
                 ScreenHeader(title: "NIGHT GARAGE", subtitle: "\(store.progress.currency) coins available") { model.screen = .menu }
-                ScrollView {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 245), spacing: 14)], spacing: 14) {
-                        ForEach(UpgradeKind.allCases) { kind in
-                            upgradeCard(kind)
-                        }
-                        ForEach(WeaponKind.allCases) { weapon in
-                            let weaponLevel = store.progress.upgradeLevel(weapon)
-                            unlockCard(title: weapon.title, detail: "Weapon • level \(weaponLevel)/3", icon: weapon.icon, unlocked: store.progress.isUnlocked(weapon) && weaponLevel >= 3) {
-                                if store.progress.isUnlocked(weapon) { _ = store.buyWeaponUpgrade(weapon) }
-                                else { _ = store.unlock(weapon) }
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 245), spacing: 14)], spacing: 14) {
+                            ForEach(UpgradeKind.allCases) { kind in
+                                upgradeCard(kind)
+                            }
+                            ForEach(WeaponKind.allCases) { weapon in
+                                let weaponLevel = store.progress.upgradeLevel(weapon)
+                                unlockCard(title: weapon.title, detail: "Weapon • level \(weaponLevel)/3", icon: weapon.icon, unlocked: store.progress.isUnlocked(weapon) && weaponLevel >= 3) {
+                                    if store.progress.isUnlocked(weapon) { _ = store.buyWeaponUpgrade(weapon) }
+                                    else { _ = store.unlock(weapon) }
+                                }
+                            }
+                            ForEach(TrapKind.allCases) { trap in
+                                unlockCard(title: trap.title, detail: "Trap • \(trap.unlockCost) coins", icon: trap.icon, unlocked: store.progress.isUnlocked(trap)) {
+                                    _ = store.unlock(trap)
+                                }
                             }
                         }
-                        ForEach(TrapKind.allCases) { trap in
-                            unlockCard(title: trap.title, detail: "Trap • \(trap.unlockCost) coins", icon: trap.icon, unlocked: store.progress.isUnlocked(trap)) {
-                                _ = store.unlock(trap)
-                            }
-                        }
+                        .id("top")
                     }
+                    // A ScrollView's initial content offset isn't reliably (0, 0) on first
+                    // appearance in every case — force it, or a tall grid can open already
+                    // scrolled past the header, leaving no visible way back to the menu.
+                    .onAppear { proxy.scrollTo("top", anchor: .top) }
                 }
             }
             .padding(32)
@@ -515,8 +543,14 @@ private struct SettingsView: View {
                 ScreenHeader(title: "SETTINGS", subtitle: "Tune the night shift") { model.screen = .menu }
                 // Landscape-only means limited vertical room on smaller phones — scroll instead
                 // of letting the toggles/sliders/reset button run off the bottom of the screen.
-                ScrollView(showsIndicators: false) {
-                    SettingsPanel(store: store)
+                ScrollViewReader { proxy in
+                    ScrollView(showsIndicators: false) {
+                        SettingsPanel(store: store).id("top")
+                    }
+                    // A ScrollView's initial content offset isn't reliably (0, 0) on first
+                    // appearance in every case — force it, or the panel can open already
+                    // scrolled past the header, leaving no visible way back to the menu.
+                    .onAppear { proxy.scrollTo("top", anchor: .top) }
                 }
             }
             .padding(32)
@@ -649,7 +683,8 @@ private struct GameContainerView: View {
                 actionBar
             }
             .padding(.horizontal, 18)
-            .padding(.vertical, 12)
+            .padding(.top, 12)
+            .padding(.bottom, 2)
 
             if session.showsTutorial { tutorial }
             if session.isPaused {
@@ -1260,22 +1295,31 @@ private struct ModalCard<Content: View>: View {
     var body: some View {
         ZStack {
             Color.black.opacity(0.67).ignoresSafeArea()
-            // GeometryReader + flexible spacers keeps a short modal (pause, result) visually
+            // GeometryReader + a minHeight frame keeps a short modal (pause, result) visually
             // centered exactly like before, but lets a tall one (settings, with every toggle,
-            // slider, and the difficulty picker) scroll instead of overflowing the screen —
-            // this game is landscape-only, so vertical room is tight on smaller phones.
+            // slider, and the difficulty picker) scroll from its own top instead of overflowing
+            // the screen — this game is landscape-only, so vertical room is tight on smaller
+            // phones. A pair of flexible `Spacer`s inside the scrolled content did this previously,
+            // but `Spacer` sizing inside a `ScrollView` is unreliable (it can measure against the
+            // scroll view's effectively-unbounded proposal instead of the real viewport), which
+            // could leave a tall card's initial scroll position mid-card — burying its header and
+            // back button off the top of the screen with no way to scroll back up to them.
+            // `.frame(minHeight:alignment:)` centers only when there's genuine leftover space and
+            // otherwise leaves the card's own top exactly at the scroll view's top.
             GeometryReader { proxy in
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: 0) {
-                        Spacer(minLength: 0)
-                        card
-                        Spacer(minLength: 0)
+                ScrollViewReader { scrollProxy in
+                    ScrollView(showsIndicators: false) {
+                        card.frame(minHeight: proxy.size.height).id("top")
                     }
                     // maxWidth: .infinity makes the VStack claim the ScrollView's full width so its
                     // own centered alignment can center `card` horizontally — the vertical Spacers
                     // only ever flexed along the VStack's own axis, so without this the VStack just
                     // hugged the card's width and ScrollView left-aligned it instead of centering.
+                    // Belt-and-suspenders alongside the frame fix above: force the scroll
+                    // position on appearance so a tall card can never open already scrolled
+                    // past its own header.
                     .frame(maxWidth: .infinity, minHeight: proxy.size.height)
+                    .onAppear { scrollProxy.scrollTo("top", anchor: .top) }
                 }
             }
         }

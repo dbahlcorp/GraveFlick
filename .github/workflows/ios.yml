@@ -11,6 +11,11 @@ on:
         required: true
         type: boolean
         default: false
+      bootstrap_certificates:
+        description: "One-time only: create the App Store signing certificate and store it in GraveFlick-Certificates instead of releasing. Only run after revoking a spare certificate slot in the Apple Developer portal."
+        required: true
+        type: boolean
+        default: false
 
 jobs:
   build:
@@ -58,7 +63,7 @@ jobs:
 
   testflight:
     name: TestFlight release
-    if: github.event_name == 'workflow_dispatch' && inputs.upload_testflight
+    if: github.event_name == 'workflow_dispatch' && (inputs.upload_testflight || inputs.bootstrap_certificates)
     needs: build
     runs-on: macos-26
     timeout-minutes: 45
@@ -70,13 +75,15 @@ jobs:
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
       ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+      MATCH_GIT_TOKEN: ${{ secrets.MATCH_GIT_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - name: Validate release secrets
         shell: bash
         run: |
           missing=()
-          for name in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_CONTENT APPLE_TEAM_ID; do
+          for name in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_CONTENT APPLE_TEAM_ID MATCH_PASSWORD MATCH_GIT_TOKEN; do
             if [ -z "${!name:-}" ]; then missing+=("$name"); fi
           done
           if [ "${#missing[@]}" -gt 0 ]; then
@@ -101,10 +108,14 @@ jobs:
             echo "::error::Expected com.bahlcorp.graveflick"
             exit 1
           fi
+      - name: Create signing certificate (one-time bootstrap)
+        if: inputs.bootstrap_certificates
+        run: bundle exec fastlane ios bootstrap_certificates
       - name: Archive, sign, and upload
+        if: inputs.upload_testflight
         run: bundle exec fastlane ios beta
       - name: Upload signed archive artifact
-        if: always()
+        if: always() && inputs.upload_testflight
         uses: actions/upload-artifact@v4
         with:
           name: GraveFlick-TestFlight-${{ github.run_number }}

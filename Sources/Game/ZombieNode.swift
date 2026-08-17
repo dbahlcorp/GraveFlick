@@ -271,7 +271,7 @@ final class ZombieNode: SKNode {
         health = maximumHealth
 
         shadowNode = SKShapeNode(ellipseOf: CGSize(width: kind.size.width * 0.72, height: 16))
-        shadowNode.fillColor = .black.withAlphaComponent(0.34)
+        shadowNode.fillColor = .black.withAlphaComponent(0.02)
         shadowNode.strokeColor = .clear
         shadowNode.position.y = -kind.size.height * 0.43
 
