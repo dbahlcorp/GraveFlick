@@ -203,9 +203,14 @@ private struct MainMenuView: View {
 
                     // Dense stack of fixed-height buttons — on a small landscape phone (or with
                     // Dynamic Type bumped up) this can outgrow the available height on its own;
-                    // scroll instead of letting the bottom rows run off-panel.
+                    // scroll instead of letting the bottom rows run off-panel. The vertical
+                    // Spacers only flex the ScrollView's own content is naturally shorter than
+                    // the panel, so without the outer minHeight frame it just top-aligns instead
+                    // of centering, leaving the panel's extra height as dead space below.
                     ScrollView(showsIndicators: false) {
-                        VStack(spacing: 8) {
+                        VStack(spacing: 0) {
+                            Spacer(minLength: 0)
+                            VStack(spacing: 8) {
                             Text("THE LAST LIGHT DINER NEVER CLOSES QUIETLY")
                                 .font(.system(size: 10, weight: .black))
                                 .tracking(1.5)
@@ -254,7 +259,10 @@ private struct MainMenuView: View {
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.72)
                             }
+                            }
+                            Spacer(minLength: 0)
                         }
+                        .frame(maxWidth: .infinity, minHeight: geometry.size.height)
                     }
                     .frame(width: min(max(330, geometry.size.width * 0.46), 460))
                     .frame(maxHeight: geometry.size.height)
@@ -298,8 +306,9 @@ private struct CreditsView: View {
                 ScreenHeader(title: "CREDITS & ACHIEVEMENTS", subtitle: "An original midnight survival comedy") { model.screen = .menu }
                 // The achievements column (9 fixed-height rows) can outgrow a landscape phone's
                 // vertical space on its own — scroll the whole content area rather than clip it.
-                ScrollViewReader { proxy in
-                    ScrollView(showsIndicators: false) {
+                // No ScrollViewReader/onAppear(scrollTo:) — see UpgradeShopView for why that
+                // pattern fights the user's own scrolling instead of just setting the initial spot.
+                ScrollView(showsIndicators: false) {
                         HStack(alignment: .top, spacing: 22) {
                             VStack(alignment: .leading, spacing: 10) {
                                 Text("CREATED BY DBAHLCORP").font(.headline.weight(.black))
@@ -335,12 +344,7 @@ private struct CreditsView: View {
                             }
                             .frame(maxWidth: 440)
                         }
-                        .id("top")
-                    }
-                    // A ScrollView's initial content offset isn't reliably (0, 0) on first
-                    // appearance in every case — force it, or this can open already scrolled
-                    // past the header, leaving no visible way back to the menu.
-                    .onAppear { proxy.scrollTo("top", anchor: .top) }
+                        .padding(.vertical, 10)
                 }
             }
             .padding(32)
@@ -356,7 +360,9 @@ private struct LevelSelectView: View {
         NightBackground {
             VStack(spacing: 10) {
                 ScreenHeader(title: "NIGHT ROUTE", subtitle: "Twenty-five shifts across eight haunted stops.") { model.screen = .menu }
-                ScrollViewReader { proxy in
+                // No ScrollViewReader/onAppear(scrollTo:) — see UpgradeShopView for why that
+                // pattern fights the user's own scrolling. A horizontal ScrollView already starts
+                // at its leading edge (Night 1) by default without needing to force it.
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 16) {
                         ForEach(GameLevel.campaign) { level in
@@ -365,8 +371,7 @@ private struct LevelSelectView: View {
                                 if unlocked { model.start(level) }
                             } label: {
                                 VStack(alignment: .leading, spacing: 12) {
-                                    Image(level.environmentAssetName)
-                                        .resizable()
+                                    BundledArtImage(name: level.environmentAssetName, subdirectory: "Art/Environments")
                                         .scaledToFill()
                                         .frame(height: 60)
                                         .clipShape(RoundedRectangle(cornerRadius: 12))
@@ -381,7 +386,7 @@ private struct LevelSelectView: View {
                                     HStack {
                                         Text(level.title).font(.headline.weight(.black))
                                         Spacer()
-                                        Image(unlocked ? "ui_star" : "ui_lock").resizable().scaledToFit().frame(width: 24, height: 24)
+                                        BundledArtImage(name: unlocked ? "ui_star" : "ui_lock", subdirectory: "Art/UI/Icons").scaledToFit().frame(width: 24, height: 24)
                                     }
                                     Text(level.subtitle).font(.caption).foregroundStyle(.white.opacity(0.6))
                                     Spacer()
@@ -405,12 +410,6 @@ private struct LevelSelectView: View {
                         }
                     }
                     .padding(.horizontal, 4)
-                    .id("leading")
-                }
-                // A ScrollView's initial content offset isn't reliably (0, 0) on first
-                // appearance in every case — force it to the leading edge so the route always
-                // opens on Night 1 instead of wherever it happened to land.
-                .onAppear { proxy.scrollTo("leading", anchor: .leading) }
                 }
             }
             .padding(18)
@@ -425,28 +424,24 @@ private struct ChallengeSelectView: View {
         NightBackground {
             VStack(spacing: 12) {
                 ScreenHeader(title: "BONUS NIGHTS", subtitle: "Fifteen original rule-bending shifts") { model.screen = .menu }
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 205), spacing: 12)], spacing: 12) {
-                            ForEach(GameLevel.challenges) { level in
-                                Button { model.start(level) } label: {
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        Text(level.title).font(.headline.weight(.black))
-                                        Text(level.modifier.title).font(.caption).foregroundStyle(.cyan)
-                                        Text("4 WAVES • +\(level.reward) COINS").font(.caption2.weight(.black)).foregroundStyle(.white.opacity(0.55))
-                                    }
-                                    .frame(maxWidth: .infinity, alignment: .leading).padding(16)
-                                    .background(Color.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 16))
-                                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.orange.opacity(0.45)))
-                                }.buttonStyle(.plain)
-                            }
+                // No ScrollViewReader/onAppear(scrollTo:) — see UpgradeShopView for why that
+                // pattern fights the user's own scrolling instead of just setting the initial spot.
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 205), spacing: 12)], spacing: 12) {
+                        ForEach(GameLevel.challenges) { level in
+                            Button { model.start(level) } label: {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text(level.title).font(.headline.weight(.black))
+                                    Text(level.modifier.title).font(.caption).foregroundStyle(.cyan)
+                                    Text("4 WAVES • +\(level.reward) COINS").font(.caption2.weight(.black)).foregroundStyle(.white.opacity(0.55))
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading).padding(16)
+                                .background(Color.black.opacity(0.65), in: RoundedRectangle(cornerRadius: 16))
+                                .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.orange.opacity(0.45)))
+                            }.buttonStyle(.plain)
                         }
-                        .id("top")
                     }
-                    // A ScrollView's initial content offset isn't reliably (0, 0) on first
-                    // appearance in every case — force it, or a tall grid can open already
-                    // scrolled past the header, leaving no visible way back to the menu.
-                    .onAppear { proxy.scrollTo("top", anchor: .top) }
+                    .padding(.vertical, 10)
                 }
             }.padding(24)
         }
@@ -461,31 +456,30 @@ private struct UpgradeShopView: View {
         NightBackground {
             VStack(spacing: 16) {
                 ScreenHeader(title: "NIGHT GARAGE", subtitle: "\(store.progress.currency) coins available") { model.screen = .menu }
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 245), spacing: 14)], spacing: 14) {
-                            ForEach(UpgradeKind.allCases) { kind in
-                                upgradeCard(kind)
-                            }
-                            ForEach(WeaponKind.allCases) { weapon in
-                                let weaponLevel = store.progress.upgradeLevel(weapon)
-                                unlockCard(title: weapon.title, detail: "Weapon • level \(weaponLevel)/3", icon: weapon.icon, unlocked: store.progress.isUnlocked(weapon) && weaponLevel >= 3) {
-                                    if store.progress.isUnlocked(weapon) { _ = store.buyWeaponUpgrade(weapon) }
-                                    else { _ = store.unlock(weapon) }
-                                }
-                            }
-                            ForEach(TrapKind.allCases) { trap in
-                                unlockCard(title: trap.title, detail: "Trap • \(trap.unlockCost) coins", icon: trap.icon, unlocked: store.progress.isUnlocked(trap)) {
-                                    _ = store.unlock(trap)
-                                }
+                // No ScrollViewReader/onAppear(scrollTo:) here on purpose — that pattern was
+                // fighting the user's own scrolling (it can re-fire well after the screen opens,
+                // snapping position back to the top mid-interaction). A plain ScrollView already
+                // starts at the top reliably; the vertical padding below just keeps the first and
+                // last rows from sitting flush against the clip edge, where they read as cut off.
+                ScrollView {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 245), spacing: 14)], spacing: 14) {
+                        ForEach(UpgradeKind.allCases) { kind in
+                            upgradeCard(kind)
+                        }
+                        ForEach(WeaponKind.allCases) { weapon in
+                            let weaponLevel = store.progress.upgradeLevel(weapon)
+                            unlockCard(title: weapon.title, detail: "Weapon • level \(weaponLevel)/3", icon: weapon.icon, unlocked: store.progress.isUnlocked(weapon) && weaponLevel >= 3) {
+                                if store.progress.isUnlocked(weapon) { _ = store.buyWeaponUpgrade(weapon) }
+                                else { _ = store.unlock(weapon) }
                             }
                         }
-                        .id("top")
+                        ForEach(TrapKind.allCases) { trap in
+                            unlockCard(title: trap.title, detail: "Trap • \(trap.unlockCost) coins", icon: trap.icon, unlocked: store.progress.isUnlocked(trap)) {
+                                _ = store.unlock(trap)
+                            }
+                        }
                     }
-                    // A ScrollView's initial content offset isn't reliably (0, 0) on first
-                    // appearance in every case — force it, or a tall grid can open already
-                    // scrolled past the header, leaving no visible way back to the menu.
-                    .onAppear { proxy.scrollTo("top", anchor: .top) }
+                    .padding(.vertical, 10)
                 }
             }
             .padding(32)
@@ -546,14 +540,14 @@ private struct SettingsView: View {
                 ScreenHeader(title: "SETTINGS", subtitle: "Tune the night shift") { model.screen = .menu }
                 // Landscape-only means limited vertical room on smaller phones — scroll instead
                 // of letting the toggles/sliders/reset button run off the bottom of the screen.
-                ScrollViewReader { proxy in
-                    ScrollView(showsIndicators: false) {
-                        SettingsPanel(store: store).id("top")
-                    }
-                    // A ScrollView's initial content offset isn't reliably (0, 0) on first
-                    // appearance in every case — force it, or the panel can open already
-                    // scrolled past the header, leaving no visible way back to the menu.
-                    .onAppear { proxy.scrollTo("top", anchor: .top) }
+                // No ScrollViewReader/onAppear(scrollTo:) here on purpose — that pattern was
+                // fighting the user's own scrolling (it can re-fire well after the screen opens,
+                // snapping position back to the top mid-interaction). A plain ScrollView already
+                // starts at the top reliably; the vertical padding keeps the top and bottom
+                // controls from sitting flush against the clip edge, where they read as cut off.
+                ScrollView(showsIndicators: false) {
+                    SettingsPanel(store: store)
+                        .padding(.vertical, 10)
                 }
             }
             .padding(32)
@@ -615,7 +609,7 @@ private struct SettingsPanel: View {
             }
         )) {
             HStack(spacing: 12) {
-                Image(icon).resizable().scaledToFit().frame(width: 30, height: 30)
+                BundledArtImage(name: icon, subdirectory: "Art/UI/Icons").scaledToFit().frame(width: 30, height: 30)
                 Text(title).font(.headline)
             }
         }
@@ -627,7 +621,7 @@ private struct SettingsPanel: View {
 
     private func volumeSlider(_ title: String, icon: String, keyPath: WritableKeyPath<GameSettings, Double>) -> some View {
         HStack(spacing: 12) {
-            Image(icon).resizable().scaledToFit().frame(width: 25, height: 25)
+            BundledArtImage(name: icon, subdirectory: "Art/UI/Icons").scaledToFit().frame(width: 25, height: 25)
             Text(title).font(.subheadline.weight(.semibold)).frame(width: 105, alignment: .leading)
             Slider(value: Binding(
                 get: { store.settings[keyPath: keyPath] },
@@ -920,7 +914,7 @@ private struct GameContainerView: View {
 
     private var tutorial: some View {
         ModalCard {
-            Image("ui_graveflick_logo").resizable().scaledToFit().frame(width: 260, height: 108)
+            BundledArtImage(name: "ui_graveflick_logo", subdirectory: "Art/UI").scaledToFit().frame(width: 260, height: 108)
             Text("YOUR FIRST NIGHT").font(.title.weight(.black))
             HStack(spacing: 24) {
                 tutorialStep("1", "GRAB", "Touch and hold any creature", icon: "ui_tutorial_grab", motion: .scale)
@@ -944,7 +938,7 @@ private struct GameContainerView: View {
         VStack(spacing: 6) {
             ZStack {
                 Circle().fill(Color.orange.opacity(0.20)).frame(width: 48, height: 48)
-                Image(icon).resizable().scaledToFit().frame(width: 40, height: 40)
+                BundledArtImage(name: icon, subdirectory: "Art/UI/Icons").scaledToFit().frame(width: 40, height: 40)
             }
             .scaleEffect(motion == .scale && tutorialGesture ? 1.18 : 1)
             .offset(x: motion == .horizontal && tutorialGesture ? 15 : 0,
@@ -972,7 +966,7 @@ private struct GameContainerView: View {
         ModalCard {
             HStack {
                 Button(action: { showsSettings = false }) {
-                    Image("ui_back").resizable().scaledToFit().frame(width: 22, height: 22)
+                    BundledArtImage(name: "ui_back", subdirectory: "Art/UI/Icons").scaledToFit().frame(width: 22, height: 22)
                 }
                 .hudButton(compact: true)
                 Text("SETTINGS").font(.title.weight(.black))
@@ -984,8 +978,8 @@ private struct GameContainerView: View {
 
     private func resultModal(_ result: LevelResult) -> some View {
         ModalCard(animated: !store.settings.reducedMotion) {
-            Image(result.won ? "diner_complete" : "diner_destroyed")
-                .resizable().scaledToFit().frame(width: 280, height: 145)
+            BundledArtImage(name: result.won ? "diner_complete" : "diner_destroyed", subdirectory: "Art/Diner")
+                .scaledToFit().frame(width: 280, height: 145)
             Text(result.won ? "LOT CLEARED" : (session.level.isEndless ? "NIGHT SHIFT ENDED" : "DINER OVERRUN")).font(.title.weight(.black))
             if session.level.isEndless {
                 Text("REACHED WAVE \(result.wave)")
@@ -1014,8 +1008,7 @@ private struct NightBackground<Content: View>: View {
     @ViewBuilder let content: () -> Content
     var body: some View {
         ZStack {
-            Image("environment_01_closing_time")
-                .resizable()
+            BundledArtImage(name: "environment_01_closing_time", subdirectory: "Art/Environments")
                 .scaledToFill()
                 .ignoresSafeArea()
             LinearGradient(colors: [.black.opacity(0.18), Color(red: 0.02, green: 0.025, blue: 0.06).opacity(0.78)], startPoint: .top, endPoint: .bottom)
@@ -1033,7 +1026,7 @@ private struct ScreenHeader: View {
     let back: () -> Void
     var body: some View {
         HStack {
-            Button(action: back) { Image("ui_back").resizable().scaledToFit().frame(width: 27, height: 27) }.hudButton()
+            Button(action: back) { BundledArtImage(name: "ui_back", subdirectory: "Art/UI/Icons").scaledToFit().frame(width: 27, height: 27) }.hudButton()
             VStack(alignment: .leading) {
                 Text(title).font(.largeTitle.weight(.black))
                 Text(subtitle).foregroundStyle(.white.opacity(0.58))
@@ -1275,7 +1268,7 @@ private struct RoadsideIcon: View {
     var body: some View {
         Group {
             if let imageName {
-                Image(imageName).resizable().scaledToFit().padding(7)
+                BundledArtImage(name: imageName, subdirectory: "Art/Weapons").scaledToFit().padding(7)
             } else if let systemName {
                 Image(systemName: systemName).font(.title2.weight(.bold))
             }
