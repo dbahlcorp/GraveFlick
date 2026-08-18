@@ -66,8 +66,9 @@ final class GameSessionModel: ObservableObject, GameSceneDelegate, Identifiable 
         self.progress = progress
         self.completion = completion
         showsTutorial = !progress.hasSeenTutorial
-        health = level.isSandbox ? 9_999 : (level.modifier == .suddenDeath ? 1 : GameRules.startingHealth + progress.upgradeLevel(.reinforcedDiner) * GameRules.reinforcedDinerHealthPerLevel)
-        maximumHealth = health
+        let resolvedHealth = level.isSandbox ? 9_999 : (level.modifier == .suddenDeath ? 1 : GameRules.startingHealth + progress.upgradeLevel(.reinforcedDiner) * GameRules.reinforcedDinerHealthPerLevel)
+        health = resolvedHealth
+        maximumHealth = resolvedHealth
         scene = GameScene(level: level, progress: progress, settings: settings, size: CGSize(width: 1194, height: 834))
         scene.gameDelegate = self
         if showsTutorial { scene.isGameplayPaused = true }
