@@ -75,6 +75,15 @@ enum GameRules {
         return wave.isMultiple(of: 10) ? .colossus : .butcher
     }
 
+    /// Odds a wave rolls a WaveModifier at all (see GameScene.rollWaveModifier) — rare and mild
+    /// early, common by the time a run is deep enough to already be numerically brutal, so
+    /// escalation stops meaning "the same fight with bigger numbers" long before raw scaling
+    /// alone would make that obvious. Reuses survivalDifficulty's tier grouping (every 5 waves).
+    static func waveModifierChance(wave: Int) -> Double {
+        let tier = (max(1, wave) - 1) / 5
+        return min(0.65, 0.15 + Double(tier) * 0.10)
+    }
+
     static func storyBossKind(levelID: Int, wave: Int, totalWaves: Int) -> ZombieKind? {
         guard wave == totalWaves else { return nil }
         return switch levelID {
