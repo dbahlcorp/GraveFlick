@@ -781,7 +781,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
 
         if let zombie = zombieBody(in: bodies), let weaponBody = bodies.first(where: { $0.categoryBitMask == PhysicsCategory.weapon }) {
-            if let weaponKind = weaponBody.node?.name.flatMap(WeaponKind.init(rawValue:)), let sound = impactSound(for: weaponKind) {
+            let weaponKind = weaponBody.node?.name.flatMap(WeaponKind.init(rawValue:))
+            if let weaponKind, let sound = impactSound(for: weaponKind) {
                 SoundManager.shared.play(sound)
             }
             playCombatVFX(.zombieSplatter, at: contact.contactPoint, size: 92, direction: zombie.approachesFromLeft ? -1 : 1)
@@ -790,7 +791,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // and bypass the usual "survives its first ordinary hit" floor — that's the whole
             // point of brittleness — while a normal zombie's first hit is unaffected.
             if zombie.damageAt(contact.contactPoint, amount: baseDamage * zombie.kind.weaponDamageMultiplier * zombie.frozenImpactDamageMultiplier, canOverkill: zombie.isFrozenSolid) {
-                defeat(zombie, reason: .weapon)
+                // Tracked on the projectile itself (see incrementKillTally) so a bowling ball that
+                // rolls through several zombies knows this is its 2nd+ kill — that's ZOMBIE BOWLING.
+                let tally = incrementKillTally(on: weaponBody.node)
+                defeat(zombie, reason: .weapon, multiKillTally: tally, weaponKind: weaponKind)
             } else {
                 SoundManager.shared.playZombieVoice(for: zombie.kind, moment: .hurt, pan: audioPan(for: zombie))
                 // A walking zombie's body is kinematic (isDynamic == false, see ZombieNode.init),
@@ -1113,22 +1117,36 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if health == 0 { finish(won: false) }
     }
 
-    private func defeat(_ zombie: ZombieNode, reason: DefeatReason) {
+    /// - Parameters:
+    ///   - multiKillTally: this kill's position (1-based) within a single weapon/blast pass —
+    ///     e.g. the bowling ball's 2nd zombie on one roll, or an explosion's 2nd victim. Fuels
+    ///     ZOMBIE BOWLING/CHAIN REACTION. Defaults to 1 (an unrelated, standalone kill).
+    ///   - weaponKind: which weapon caused a `.weapon` kill, needed to tell a bowling multi-kill
+    ///     apart from any other weapon's. nil for every other reason.
+    private func defeat(_ zombie: ZombieNode, reason: DefeatReason, multiKillTally: Int = 1, weaponKind: WeaponKind? = nil) {
         guard zombie.parent != nil, !zombie.isDefeated else { return }
-        if elapsedTime - lastDefeatTime <= 1.8 { combo += 1 } else { combo = 1 }
+        let gapSincePreviousKill = elapsedTime - lastDefeatTime
+        if gapSincePreviousKill <= 1.8 { combo += 1 } else { combo = 1 }
         maxCombo = max(maxCombo, combo)
         defeats += 1
         if level.isSandbox { sandboxDefeats += 1 }
         lastDefeatTime = elapsedTime
-        let killScore = GameRules.score(for: zombie.kind, combo: combo)
-        score += killScore
-        specialCharge = min(1, specialCharge + (zombie.kind.isBoss ? 0.5 : (zombie.kind == .brute ? 0.22 : 0.12)))
-        let point = zombie.position
-        let volatile = zombie.kind == .volatile
         // 0 unless this kill was the direct result of a flick/knockback landing or slamming into
         // something (see ZombieNode.lastImpactPower) — a weapon/trap/collision kill with no throw
         // of its own keeps the previous fixed feel below.
         let power = zombie.lastImpactPower
+        // Read before playDefeat() below overwrites it to .defeated — DINER SPECIAL needs to know
+        // whether this zombie was actively latched onto the diner at the moment it died.
+        let preDefeatState = zombie.currentAnimationState
+        let event = comboEvent(
+            reason: reason, combo: combo, gapSincePreviousKill: gapSincePreviousKill,
+            multiKillTally: multiKillTally, weaponKind: weaponKind, impactPower: power, preDefeatState: preDefeatState
+        )
+        let killScore = GameRules.score(for: zombie.kind, combo: combo, event: event)
+        score += killScore
+        specialCharge = min(1, specialCharge + (zombie.kind.isBoss ? 0.5 : (zombie.kind == .brute ? 0.22 : 0.12)))
+        let point = zombie.position
+        let volatile = zombie.kind == .volatile
         if settings.goreEnabled {
             spawnPhysicsDebris(from: zombie, reason: reason)
         }
@@ -1165,10 +1183,38 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         runHaptic(power > 0 ? impactHapticStyle(for: power) : .medium)
         if power > 0.3 { shakeCamera(intensity: 0.2 + power * 1.1) }
         showScorePopup(at: point, score: killScore)
-        showCombo(at: point)
+        if let event {
+            showComboEvent(event, at: point)
+        } else {
+            showCombo(at: point)
+        }
         hitStop(duration: min(0.13, 0.045 + Double(combo) * 0.004 + Double(power) * 0.05))
         if Int.random(in: 0..<5) == 0 { spawnPickup(at: point) }
         if volatile, reason != .explosion { explodeVolatile(at: point) }
+    }
+
+    /// Picks the single highest-priority named event this kill qualifies for (see ComboEvent's
+    /// case docs), or nil for an ordinary kill. Order matters: a rarer, more specific feat (e.g. a
+    /// bowling multi-kill) wins over a merely-coincidental one (two unrelated kills that happened
+    /// to land within a fraction of a second of each other).
+    private func comboEvent(
+        reason: DefeatReason,
+        combo: Int,
+        gapSincePreviousKill: TimeInterval,
+        multiKillTally: Int,
+        weaponKind: WeaponKind?,
+        impactPower: CGFloat,
+        preDefeatState: ZombieAnimationState
+    ) -> ComboEvent? {
+        if reason == .thrownOut { return .airMail }
+        if reason == .collision { return .friendlyFire }
+        if reason == .weapon, weaponKind == .bowlingBall, multiKillTally >= 2 { return .zombieBowling }
+        if reason == .explosion, multiKillTally >= 2 { return .chainReaction }
+        if preDefeatState == .attacking || preDefeatState == .holdingAtDiner { return .dinerSpecial }
+        if reason == .impact, impactPower > 0.85 { return .headOverHeels }
+        if combo >= 6 { return .graveyardShift }
+        if combo >= 2, gapSincePreviousKill < 0.35 { return .doubleTap }
+        return nil
     }
 
     private func defeatStyle(for reason: DefeatReason) -> ZombieDefeatStyle {
@@ -1192,9 +1238,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let nearby = activeZombies.filter {
             !$0.isDefeated && hypot($0.position.x - point.x, $0.position.y - point.y) < radius
         }
+        var killTally = 0
         for zombie in nearby {
-            if zombie.damage(1.6) { defeat(zombie, reason: .explosion) }
-            else {
+            if zombie.damage(1.6) {
+                killTally += 1
+                defeat(zombie, reason: .explosion, multiKillTally: killTally)
+            } else {
                 zombie.launch(with: radialImpulse(from: point, to: zombie.position, radius: radius, maxImpulse: 380, minImpulse: 140))
             }
         }
@@ -1449,9 +1498,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func throwExplosive(at point: CGPoint, radius: CGFloat, damage: CGFloat, maxImpulse: CGFloat = 460, minImpulse: CGFloat = 140) {
+        var killTally = 0
         for zombie in activeZombies where !zombie.isDefeated && hypot(zombie.position.x - point.x, zombie.position.y - point.y) < radius {
             if zombie.damage(damage * zombie.kind.weaponDamageMultiplier, canOverkill: true) {
-                defeat(zombie, reason: .explosion)
+                killTally += 1
+                defeat(zombie, reason: .explosion, multiKillTally: killTally)
             } else {
                 zombie.launch(with: radialImpulse(from: point, to: zombie.position, radius: radius, maxImpulse: maxImpulse, minImpulse: minImpulse))
             }
@@ -2160,6 +2211,42 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         ]))
     }
 
+    /// The named-event banner (see ComboEvent) — bigger, bolder, and punchier than the plain
+    /// `×N COMBO` text it replaces for that kill, since it's calling out *how* the kill happened
+    /// rather than just a running count.
+    private func showComboEvent(_ event: ComboEvent, at point: CGPoint) {
+        let label = SKLabelNode(fontNamed: "AvenirNext-Heavy")
+        label.text = event.displayName
+        label.fontSize = 26
+        label.fontColor = comboEventColor(event)
+        label.horizontalAlignmentMode = .center
+        label.position = CGPoint(x: point.x, y: min(size.height - 64, point.y + 56))
+        label.zPosition = 121
+        label.setScale(0.4)
+        label.zRotation = CGFloat.random(in: -0.05...0.05)
+        world.addChild(label)
+        label.run(.sequence([
+            .group([.scale(to: 1.18, duration: 0.09), .moveBy(x: 0, y: 10, duration: 0.09)]),
+            .scale(to: 1, duration: 0.07),
+            .wait(forDuration: 0.32),
+            .group([.moveBy(x: 0, y: 24, duration: 0.42), .fadeOut(withDuration: 0.42), .scale(to: 0.85, duration: 0.42)]),
+            .removeFromParent()
+        ]))
+    }
+
+    private func comboEventColor(_ event: ComboEvent) -> SKColor {
+        switch event {
+        case .airMail: SKColor(red: 0.42, green: 0.78, blue: 1.0, alpha: 1)
+        case .friendlyFire: SKColor(red: 1.0, green: 0.55, blue: 0.18, alpha: 1)
+        case .zombieBowling: SKColor(red: 0.95, green: 0.92, blue: 0.55, alpha: 1)
+        case .chainReaction: SKColor(red: 1.0, green: 0.42, blue: 0.24, alpha: 1)
+        case .dinerSpecial: SKColor(red: 0.55, green: 1.0, blue: 0.62, alpha: 1)
+        case .headOverHeels: SKColor(red: 1.0, green: 0.32, blue: 0.68, alpha: 1)
+        case .graveyardShift: SKColor(red: 0.72, green: 0.58, blue: 1.0, alpha: 1)
+        case .doubleTap: SKColor(red: 1.0, green: 0.86, blue: 0.32, alpha: 1)
+        }
+    }
+
     /// A floating "+score" popup on every kill, not just combo chains, so single defeats still feel rewarding.
     private func showScorePopup(at point: CGPoint, score: Int) {
         let label = SKLabelNode(fontNamed: "AvenirNext-Heavy")
@@ -2206,6 +2293,22 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func runHaptic(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {
         guard settings.hapticsEnabled else { return }
         UIImpactFeedbackGenerator(style: style).impactOccurred()
+    }
+
+    /// Running kill count stashed directly on a projectile's own `userData` (self-cleaning — it
+    /// disappears with the node, no external dictionary to prune) so ZOMBIE BOWLING can tell a
+    /// bowling ball's 2nd+ kill on a single roll apart from its first.
+    private func incrementKillTally(on node: SKNode?) -> Int {
+        guard let node else { return 1 }
+        let key = "killTally"
+        let userData = node.userData ?? {
+            let dictionary = NSMutableDictionary()
+            node.userData = dictionary
+            return dictionary
+        }()
+        let tally = ((userData[key] as? Int) ?? 0) + 1
+        userData[key] = tally
+        return tally
     }
 
     /// Stumble/knockback/slam/monster haptic tiers matching ZombieNode.lastImpactPower's 0...1.4

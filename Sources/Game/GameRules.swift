@@ -12,8 +12,12 @@ enum GameRules {
     static let repairPickupAmount = 20
     static let maximumFlickSpeed: CGFloat = 2_200
 
-    static func score(for kind: ZombieKind, combo: Int) -> Int {
-        kind.scoreValue + max(0, combo - 1) * 25
+    /// `event`, when present, replaces the plain per-combo +25 bump with a flat multiplier on the
+    /// zombie's base score — score for *how* a zombie died, not merely how many died in a row. See
+    /// `ComboEvent` and GameScene.defeat(_:reason:...) for detection.
+    static func score(for kind: ZombieKind, combo: Int, event: ComboEvent? = nil) -> Int {
+        guard let event else { return kind.scoreValue + max(0, combo - 1) * 25 }
+        return Int((CGFloat(kind.scoreValue) * event.multiplier).rounded())
     }
 
     static func stars(score: Int, health: Int, startingHealth: Int, won: Bool) -> Int {
@@ -84,6 +88,57 @@ enum GameRules {
         guard totalFrames > 0 else { return [] }
         if reducedMotion { return [min(max(0, emphasizedFrame), totalFrames - 1)] }
         return Array(0..<totalFrames)
+    }
+}
+
+/// Named, skill-based kill events — the "personality" of a GraveFlick combo. Detected in
+/// GameScene.defeat(_:reason:...) from *how* a zombie died (flicked clear off the screen, killed
+/// by another zombie, chained through several targets with one throw, caught mid-bite at the
+/// diner, ...) rather than purely how many kills happened in a row. Exactly one event (the
+/// highest-priority match, see GameScene.comboEvent(for:...)) applies per kill; ordinary kills
+/// with no qualifying event keep the plain per-combo score bump from `GameRules.score`.
+enum ComboEvent: CaseIterable {
+    /// A flicked/knocked-back zombie sent clean off the play area boundary without ever landing.
+    case airMail
+    /// A zombie killed by colliding with another zombie — turning one enemy into a weapon.
+    case friendlyFire
+    /// The bowling ball claims a second (or later) kill on the same roll.
+    case zombieBowling
+    /// An explosion claims a second (or later) kill in the same blast.
+    case chainReaction
+    /// A zombie killed while actively latched onto (or parked biting) the diner — a clutch save.
+    case dinerSpecial
+    /// A monster-power flick (see ZombieNode.lastImpactPower) kills its target on ground impact.
+    case headOverHeels
+    /// A long, unbroken combo streak.
+    case graveyardShift
+    /// Two kills within a fraction of a second of each other, by any means.
+    case doubleTap
+
+    var displayName: String {
+        switch self {
+        case .airMail: "AIR MAIL"
+        case .friendlyFire: "FRIENDLY FIRE"
+        case .zombieBowling: "ZOMBIE BOWLING"
+        case .chainReaction: "CHAIN REACTION"
+        case .dinerSpecial: "DINER SPECIAL"
+        case .headOverHeels: "HEAD OVER HEELS"
+        case .graveyardShift: "GRAVEYARD SHIFT"
+        case .doubleTap: "DOUBLE TAP"
+        }
+    }
+
+    var multiplier: CGFloat {
+        switch self {
+        case .doubleTap: 1.5
+        case .airMail: 1.6
+        case .friendlyFire: 1.8
+        case .dinerSpecial: 1.9
+        case .zombieBowling: 2.0
+        case .chainReaction: 2.0
+        case .headOverHeels: 2.2
+        case .graveyardShift: 2.4
+        }
     }
 }
 
