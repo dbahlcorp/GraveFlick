@@ -51,4 +51,24 @@ enum WaveModifier: String, CaseIterable, Identifiable {
         }
         return [.fog, .blackout, .rushHour, .heavyweights, .explodersOnly, .graveTimeDisabled]
     }
+
+    /// Campaign level that must be completed at least once before this modifier can appear in
+    /// endless (0 = always available). See GameScene.rollWaveModifier, which filters `eligible(_:)`
+    /// by this against `progress.highestUnlockedLevel - 1`. Tied to whichever campaign level
+    /// actually teaches the relevant mechanic where one exists, rather than an arbitrary curve:
+    /// `.heavyweights` after level 3 ("Hard Hats", which introduces armored/riot/brute),
+    /// `.explodersOnly` after level 4 ("Pressure Cooker", which introduces volatile zombies), and
+    /// `.graveTimeDisabled`/`.doubleBoss` — the two that most change how a run plays — only after
+    /// finishing the whole 5-level core campaign, since both are "you don't need training wheels
+    /// anymore" twists. `.fog`/`.rushHour` stay available from the start so a player who jumps
+    /// straight into endless isn't locked out of *every* modifier.
+    var requiredCampaignLevel: Int {
+        switch self {
+        case .fog, .rushHour: 0
+        case .blackout: 2
+        case .heavyweights: 3
+        case .explodersOnly: 4
+        case .graveTimeDisabled, .doubleBoss: 5
+        }
+    }
 }

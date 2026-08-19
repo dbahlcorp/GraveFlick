@@ -15,7 +15,7 @@ final class ProgressStore: ObservableObject {
         self.defaults = defaults
         progress = Self.decode(PlayerProgress.self, from: defaults.data(forKey: progressKey)) ?? PlayerProgress()
         settings = Self.decode(GameSettings.self, from: defaults.data(forKey: settingsKey)) ?? GameSettings()
-        grantCampaignWeapons()
+        grantCampaignUnlocks()
         refreshDaily()
     }
 
@@ -35,7 +35,7 @@ final class ProgressStore: ObservableObject {
         }
         if result.won, GameLevel.campaign.indices.contains(result.levelID - 1) {
             progress.highestUnlockedLevel = min(GameLevel.campaign.count, max(progress.highestUnlockedLevel, result.levelID + 1))
-            grantCampaignWeapons()
+            grantCampaignUnlocks()
         }
         var newAchievements: [String] = []
         if result.won { newAchievements.append("first_shift") }
@@ -136,10 +136,15 @@ final class ProgressStore: ObservableObject {
         defaults.set(try? JSONEncoder().encode(progress), forKey: progressKey)
     }
 
-    private func grantCampaignWeapons() {
-        let loadout = WeaponKind.campaignLoadout(through: progress.highestUnlockedLevel)
-        guard !loadout.isSubset(of: progress.unlockedWeapons) else { return }
-        progress.unlockedWeapons.formUnion(loadout)
+    /// Campaign progress is the free, "learn it and it's yours" unlock path for both weapons and
+    /// traps; coin purchase (unlock(_:)) is the alternate path for players who want a toy before
+    /// they've reached its teaching level, or don't want to play campaign at all.
+    private func grantCampaignUnlocks() {
+        let weaponLoadout = WeaponKind.campaignLoadout(through: progress.highestUnlockedLevel)
+        let trapLoadout = TrapKind.campaignLoadout(through: progress.highestUnlockedLevel)
+        guard !weaponLoadout.isSubset(of: progress.unlockedWeapons) || !trapLoadout.isSubset(of: progress.unlockedTraps) else { return }
+        progress.unlockedWeapons.formUnion(weaponLoadout)
+        progress.unlockedTraps.formUnion(trapLoadout)
         saveProgress()
     }
 

@@ -60,6 +60,23 @@ final class ProgressStoreTests: XCTestCase {
         XCTAssertEqual(store.progress.highestUnlockedLevel, 1)
     }
 
+    /// Traps previously only ever unlocked via coin purchase — this is the fix that lets beating
+    /// campaign levels grant them for free too, same as weapons already did.
+    func testWinningLevelsGrantsTrapsAlongsideWeapons() {
+        let store = ProgressStore(defaults: defaults)
+        XCTAssertFalse(store.progress.isUnlocked(.spikeStrip))
+        XCTAssertFalse(store.progress.isUnlocked(.freezer))
+
+        store.complete(LevelResult(levelID: 1, score: 500, stars: 1, reward: 180, won: true, defeats: 8, maxCombo: 3, wave: 3))
+        store.complete(LevelResult(levelID: 2, score: 600, stars: 1, reward: 260, won: true, defeats: 9, maxCombo: 3, wave: 4))
+        XCTAssertTrue(store.progress.isUnlocked(.spikeStrip), "spikeStrip's campaignUnlockLevel is 2")
+        XCTAssertFalse(store.progress.isUnlocked(.freezer), "freezer requires level 4, not yet reached")
+
+        store.complete(LevelResult(levelID: 3, score: 700, stars: 1, reward: 340, won: true, defeats: 10, maxCombo: 3, wave: 4))
+        store.complete(LevelResult(levelID: 4, score: 800, stars: 1, reward: 450, won: true, defeats: 11, maxCombo: 3, wave: 5))
+        XCTAssertTrue(store.progress.isUnlocked(.freezer))
+    }
+
     func testWeaponUpgradePersistsWithoutReplacingLegacyUpgrades() {
         let store = ProgressStore(defaults: defaults)
         XCTAssertTrue(store.buyWeaponUpgrade(.bowlingBall))

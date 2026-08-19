@@ -78,6 +78,22 @@ enum GameRules {
         return wave.isMultiple(of: 10) ? .colossus : .butcher
     }
 
+    /// Which boss kinds `bossKind(forWave:)`'s rotation is actually allowed to hand to an endless
+    /// run — see GameScene.resolvedBossKind, which falls back to `.butcher` when the naturally
+    /// rotated kind isn't in this set. Butcher is the one boss with no requirement at all: without
+    /// a baseline, a player who jumps straight into endless before ever touching campaign would
+    /// hit a wave-5 "boss wave" that spawns nothing. Colossus/Bouncer are real campaign payoffs —
+    /// each requires having actually beaten the campaign level that story-introduces it
+    /// (storyBossKind), so meeting them in endless means the player earned it in campaign first.
+    /// `highestCompletedLevel` is `PlayerProgress.highestUnlockedLevel - 1` (that field advances
+    /// to N+1 only once level N is won, so subtracting 1 recovers "levels actually beaten").
+    static func unlockedBossKinds(highestCompletedLevel: Int) -> Set<ZombieKind> {
+        var kinds: Set<ZombieKind> = [.butcher]
+        if highestCompletedLevel >= 5 { kinds.insert(.colossus) }
+        if highestCompletedLevel >= 15 { kinds.insert(.bouncer) }
+        return kinds
+    }
+
     /// Odds a wave rolls a WaveModifier at all (see GameScene.rollWaveModifier) — rare and mild
     /// early, common by the time a run is deep enough to already be numerically brutal, so
     /// escalation stops meaning "the same fight with bigger numbers" long before raw scaling
@@ -89,11 +105,16 @@ enum GameRules {
 
     static func storyBossKind(levelID: Int, wave: Int, totalWaves: Int) -> ZombieKind? {
         guard wave == totalWaves else { return nil }
-        return switch levelID {
-        case 4: .butcher
-        case 5: .colossus
-        default: levelID > 5 && levelID.isMultiple(of: 5) ? (levelID.isMultiple(of: 10) ? .colossus : .butcher) : nil
+        switch levelID {
+        case 4: return .butcher
+        case 5: return .colossus
+        default: break
         }
+        guard levelID > 5, levelID.isMultiple(of: 5) else { return nil }
+        // Bouncer debuts at 15 — the same wave number it debuts on in endless (see bossKind),
+        // so meeting it in campaign and meeting it in endless are recognizably the same fight.
+        if levelID.isMultiple(of: 15) { return .bouncer }
+        return levelID.isMultiple(of: 10) ? .colossus : .butcher
     }
 
     static func animationFrameIndices(totalFrames: Int, reducedMotion: Bool, emphasizedFrame: Int) -> [Int] {

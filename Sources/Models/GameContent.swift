@@ -140,6 +140,23 @@ enum TrapKind: String, CaseIterable, Codable, Identifiable {
     var icon: String { self == .spikeStrip ? "trap_spike_strip" : "trap_flash_freezer" }
     var cooldown: TimeInterval { self == .spikeStrip ? 15 : 22 }
     var unlockCost: Int { self == .spikeStrip ? 300 : 650 }
+
+    /// Mirrors WeaponKind.campaignUnlockLevel — traps previously had no campaign-progress path at
+    /// all (coin purchase only), which is exactly the "25 disconnected levels" problem campaign
+    /// completion unlocking endless toys is meant to fix. freezer unlocks alongside level 4
+    /// ("Pressure Cooker"), which is also where `.volatile` zombies are introduced — a flash-frozen
+    /// volatile can't chain-explode, so the trap and the level's own teaching moment reinforce
+    /// each other.
+    var campaignUnlockLevel: Int {
+        switch self {
+        case .spikeStrip: 2
+        case .freezer: 4
+        }
+    }
+
+    static func campaignLoadout(through level: Int) -> Set<String> {
+        Set(allCases.filter { $0.campaignUnlockLevel <= max(1, level) }.map(\.rawValue))
+    }
 }
 
 enum UpgradeKind: String, CaseIterable, Codable, Identifiable {

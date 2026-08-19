@@ -119,6 +119,34 @@ final class GameRulesTests: XCTestCase {
         XCTAssertNil(GameRules.storyBossKind(levelID: 3, wave: 4, totalWaves: 4))
         XCTAssertEqual(GameRules.storyBossKind(levelID: 4, wave: 5, totalWaves: 5), .butcher)
         XCTAssertEqual(GameRules.storyBossKind(levelID: 5, wave: 6, totalWaves: 6), .colossus)
+        // Bouncer's campaign debut is level 15, matching its endless debut on wave 15 — same fight,
+        // same boss, so meeting it in campaign actually prepares you for meeting it in endless.
+        XCTAssertEqual(GameRules.storyBossKind(levelID: 15, wave: 8, totalWaves: 8), .bouncer)
+    }
+
+    /// Campaign completion unlocking endless content (not just five disconnected levels) is the
+    /// whole point here: Colossus/Bouncer should only ever reach an endless run once the player
+    /// has actually beaten the campaign level that story-introduces them (GameRules.storyBossKind),
+    /// while Butcher stays available with zero campaign progress so a player who jumps straight
+    /// into endless isn't met with an empty boss wave.
+    func testBossUnlocksTrackCampaignCompletionNotJustWaveNumber() {
+        XCTAssertEqual(GameRules.unlockedBossKinds(highestCompletedLevel: 0), [.butcher])
+        XCTAssertEqual(GameRules.unlockedBossKinds(highestCompletedLevel: 4), [.butcher])
+        XCTAssertEqual(GameRules.unlockedBossKinds(highestCompletedLevel: 5), [.butcher, .colossus])
+        XCTAssertEqual(GameRules.unlockedBossKinds(highestCompletedLevel: 14), [.butcher, .colossus])
+        XCTAssertEqual(GameRules.unlockedBossKinds(highestCompletedLevel: 15), [.butcher, .colossus, .bouncer])
+    }
+
+    /// The wilder WaveModifiers (see WaveModifiers.swift) are gated the same way — available only
+    /// once the campaign level that teaches the relevant mechanic is behind the player, except the
+    /// two mild ones (fog, rush hour) which stay available from the start.
+    func testWaveModifierUnlockLevelsMatchTheirTeachingCampaignLevel() {
+        XCTAssertEqual(WaveModifier.fog.requiredCampaignLevel, 0)
+        XCTAssertEqual(WaveModifier.rushHour.requiredCampaignLevel, 0)
+        XCTAssertEqual(WaveModifier.heavyweights.requiredCampaignLevel, 3)
+        XCTAssertEqual(WaveModifier.explodersOnly.requiredCampaignLevel, 4)
+        XCTAssertEqual(WaveModifier.graveTimeDisabled.requiredCampaignLevel, 5)
+        XCTAssertEqual(WaveModifier.doubleBoss.requiredCampaignLevel, 5)
     }
 
     func testDifficultyProfilesChangePressureAndRewards() {
@@ -158,6 +186,14 @@ final class GameRulesTests: XCTestCase {
         XCTAssertTrue(levelThree.contains(WeaponKind.propaneTank.rawValue))
         XCTAssertFalse(levelThree.contains(WeaponKind.airstrike.rawValue))
         XCTAssertEqual(WeaponKind.campaignLoadout(through: 20).count, WeaponKind.allCases.count)
+    }
+
+    /// Traps previously had no campaign-progress path at all (coin purchase only) — this is the
+    /// "campaign completion unlocks endless toys" fix for traps specifically.
+    func testTrapCampaignLoadoutMirrorsWeaponPattern() {
+        XCTAssertTrue(TrapKind.campaignLoadout(through: 1).isEmpty)
+        XCTAssertEqual(TrapKind.campaignLoadout(through: 2), [TrapKind.spikeStrip.rawValue])
+        XCTAssertEqual(TrapKind.campaignLoadout(through: 4), Set(TrapKind.allCases.map(\.rawValue)))
     }
 
     func testNewEnvironmentAndWeaponAssetsArePresent() {

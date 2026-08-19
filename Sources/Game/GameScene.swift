@@ -193,7 +193,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if newWave != wave {
                 wave = newWave
                 SoundManager.shared.updateGameplayMix(wave: wave, healthFraction: CGFloat(health) / CGFloat(max(1, startingHealth)))
-                let incomingBoss = GameRules.bossKind(forWave: wave)
+                let incomingBoss = resolvedBossKind(forWave: wave)
                 rollWaveModifier()
                 if let activeModifier {
                     announce(
@@ -218,7 +218,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             let interval = activeModifier == .rushHour ? difficulty.spawnInterval * 0.55 : difficulty.spawnInterval
             if timeSinceSpawn >= interval {
                 timeSinceSpawn = 0
-                let bossKind = GameRules.bossKind(forWave: wave)
+                let bossKind = resolvedBossKind(forWave: wave)
                 if let bossKind, !spawnedBossWaves.contains(wave) {
                     spawnedBossWaves.insert(wave)
                     spawnZombie(forceWalker: false, bossKind: bossKind)
@@ -862,7 +862,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             activeModifier = nil
             return
         }
-        let modifier = WaveModifier.eligible(forBossWave: isBossWave).randomElement()
+        // Campaign progress gates the wilder modifiers (see WaveModifier.requiredCampaignLevel) —
+        // fog/rush hour stay available from the start, but e.g. GRAVE TIME OFFLINE only shows up
+        // once the player has actually finished the campaign that taught them to rely on it.
+        let unlockedModifiers = WaveModifier.eligible(forBossWave: isBossWave)
+            .filter { $0.requiredCampaignLevel <= highestCompletedCampaignLevel }
+        let modifier = unlockedModifiers.randomElement()
         activeModifier = modifier
         guard let modifier else { return }
         if modifier == .fog || modifier == .blackout { showModifierOverlay(modifier) }
@@ -925,9 +930,29 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     /// Picks a random boss kind other than `kind` for DOUBLE BOSS — a list rather than a hardcoded
-    /// pair so it automatically includes whatever boss kinds exist as more get added.
+    /// pair so it automatically includes whatever boss kinds exist as more get added. Restricted
+    /// to bosses this campaign progress has actually unlocked, same as `resolvedBossKind`, so
+    /// DOUBLE BOSS can't hand a player a boss they haven't earned yet just because it rolled
+    /// alongside one they have.
     private func otherBossKind(than kind: ZombieKind) -> ZombieKind {
-        ZombieKind.allCases.filter { $0.isBoss && $0 != kind }.randomElement() ?? .butcher
+        GameRules.unlockedBossKinds(highestCompletedLevel: highestCompletedCampaignLevel)
+            .filter { $0 != kind }.randomElement() ?? .butcher
+    }
+
+    /// `PlayerProgress.highestUnlockedLevel` advances to N+1 only once level N is actually won, so
+    /// subtracting 1 recovers "levels actually beaten" — 0 for a player who's never won a campaign
+    /// level. Shared by `resolvedBossKind`, `otherBossKind`, and `rollWaveModifier`'s WaveModifier
+    /// gate, so campaign progress means the same thing everywhere endless checks it.
+    private var highestCompletedCampaignLevel: Int { max(0, progress.highestUnlockedLevel - 1) }
+
+    /// The wave's naturally-rotated boss (see GameRules.bossKind), downgraded to `.butcher` if
+    /// campaign hasn't unlocked it yet (see GameRules.unlockedBossKinds) — so Colossus/Bouncer
+    /// showing up in an endless run means the player actually beat the campaign level that
+    /// introduces them, not just that the wave number happened to line up.
+    private func resolvedBossKind(forWave wave: Int) -> ZombieKind? {
+        guard let natural = GameRules.bossKind(forWave: wave) else { return nil }
+        let unlocked = GameRules.unlockedBossKinds(highestCompletedLevel: highestCompletedCampaignLevel)
+        return unlocked.contains(natural) ? natural : .butcher
     }
 
     func didBegin(_ contact: SKPhysicsContact) {

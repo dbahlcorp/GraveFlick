@@ -474,13 +474,21 @@ private struct UpgradeShopView: View {
                         }
                         ForEach(WeaponKind.allCases) { weapon in
                             let weaponLevel = store.progress.upgradeLevel(weapon)
-                            unlockCard(title: weapon.title, detail: "Weapon • level \(weaponLevel)/3", icon: weapon.icon, unlocked: store.progress.isUnlocked(weapon) && weaponLevel >= 3) {
-                                if store.progress.isUnlocked(weapon) { _ = store.buyWeaponUpgrade(weapon) }
+                            let weaponUnlocked = store.progress.isUnlocked(weapon)
+                            // Campaign completion is a free, alternate path to every coin-purchase
+                            // unlock (see ProgressStore.grantCampaignUnlocks) — showing the level
+                            // requirement here is the only place a player would otherwise learn
+                            // beating a level hands them a weapon instead of costing coins for it.
+                            let weaponDetail = weaponUnlocked ? "Weapon • level \(weaponLevel)/3" : "Beat Level \(weapon.campaignUnlockLevel) or \(weapon.unlockCost) coins"
+                            unlockCard(title: weapon.title, detail: weaponDetail, icon: weapon.icon, unlocked: weaponUnlocked && weaponLevel >= 3) {
+                                if weaponUnlocked { _ = store.buyWeaponUpgrade(weapon) }
                                 else { _ = store.unlock(weapon) }
                             }
                         }
                         ForEach(TrapKind.allCases) { trap in
-                            unlockCard(title: trap.title, detail: "Trap • \(trap.unlockCost) coins", icon: trap.icon, unlocked: store.progress.isUnlocked(trap)) {
+                            let trapUnlocked = store.progress.isUnlocked(trap)
+                            let trapDetail = trapUnlocked ? "Trap • ready to deploy" : "Beat Level \(trap.campaignUnlockLevel) or \(trap.unlockCost) coins"
+                            unlockCard(title: trap.title, detail: trapDetail, icon: trap.icon, unlocked: trapUnlocked) {
                                 _ = store.unlock(trap)
                             }
                         }
