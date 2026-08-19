@@ -155,6 +155,11 @@ enum ZombieKind: String, CaseIterable, Codable {
     var throwResistance: CGFloat {
         switch self {
         case .riot: 1.25
+        // Boss-tier resistance despite not being a boss — matches its 2.4 physics mass (more than
+        // double a regular zombie's 1.1, see ZombieNode.init) and its whole "big, slow, heavy"
+        // identity: a full-power flick should still barely budge it, not send it flying like a
+        // Walker.
+        case .brute: 1.8
         case .butcher: 1.8
         case .colossus: 2.15
         case .bouncer: 1.9
