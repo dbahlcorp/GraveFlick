@@ -60,7 +60,7 @@ enum ZombieKind: String, CaseIterable, Codable {
     var speed: CGFloat {
         switch self {
         case .walker: 42
-        case .runner: 76
+        case .runner: 90
         case .brute: 27
         case .crawler: 58
         case .armored: 34
