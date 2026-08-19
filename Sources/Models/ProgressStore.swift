@@ -48,11 +48,12 @@ final class ProgressStore: ObservableObject {
         if result.maxCombo >= 20 { newAchievements.append("combo_20") }
         if result.defeats >= 100 { newAchievements.append("century") }
         // Skill-based feats (see GameScene.achievedFeats) are just more achievement IDs by the
-        // time they get here — same grant loop, same +100 coins, same persistence.
+        // time they get here — same grant loop, same tiered payout (Achievements.coinReward),
+        // same persistence.
         newAchievements.append(contentsOf: result.feats)
         for achievement in newAchievements where !progress.achievements.contains(achievement) {
             progress.achievements.insert(achievement)
-            progress.currency += 100
+            progress.currency += Achievements.coinReward(for: achievement)
         }
         if progress.dailyDefeats >= 25, !progress.dailyClaimed {
             progress.dailyClaimed = true

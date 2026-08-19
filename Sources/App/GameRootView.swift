@@ -306,22 +306,7 @@ private struct CreditsView: View {
     @ObservedObject var model: AppModel
     @ObservedObject var store: ProgressStore
 
-    private let achievements: [(String, String, String)] = [
-        ("first_shift", "First Shift", "Clear any night"),
-        ("perfect_shift", "Perfect Service", "Earn three stars"),
-        ("combo_8", "Eight on the Floor", "Reach an eight-hit combo"),
-        ("score_5000", "Neon Scoreboard", "Score 5,000 in one night"),
-        ("last_light", "Still Glowing", "Clear the final night")
-        ,("road_cleared", "Road Cleared", "Clear all 25 campaign nights")
-        ,("survival_20", "Long Night", "Reach survival wave 20")
-        ,("combo_20", "Floor Is Lava", "Reach a twenty-hit combo")
-        ,("century", "Closing Crew", "Defeat 100 enemies in one shift")
-        ,("bowling_triple", "Strike", "Kill 3 zombies with one bowling ball roll")
-        ,("graceful_wave", "Not a Scratch", "Clear a whole wave without a grabbed zombie touching the ground")
-        ,("boss_friendly_fire", "Not Very Friendly", "Kill a boss by colliding it with another zombie")
-        ,("sky_launch", "Reach for the Stars", "Launch a zombie clean over the top of the screen")
-        ,("chain_reaction_10", "Ten-Pin Special", "Chain a single explosion into 10 kills")
-    ]
+    private let achievements = Achievements.all
 
     var body: some View {
         NightBackground {
@@ -358,7 +343,7 @@ private struct CreditsView: View {
                                             Text(item.2).font(.caption2).foregroundStyle(.white.opacity(0.55))
                                         }
                                         Spacer()
-                                        Text(unlocked ? "+100" : "—").font(.caption.weight(.black)).foregroundStyle(.cyan)
+                                        Text(unlocked ? "+\(item.3.coinReward)" : "—").font(.caption.weight(.black)).foregroundStyle(.cyan)
                                     }
                                     .padding(.horizontal, 14)
                                     .frame(height: 52)

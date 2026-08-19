@@ -25,7 +25,8 @@ final class ProgressStoreTests: XCTestCase {
         store.complete(LevelResult(levelID: 1, score: 1_200, stars: 2, reward: 260, won: true, defeats: 10, maxCombo: 4, wave: 3))
 
         XCTAssertEqual(store.progress.highestUnlockedLevel, 2)
-        XCTAssertEqual(store.progress.currency, 710)
+        // Starting 350 + 260 reward + 50 "first_shift" (easy tier — see Achievements.swift).
+        XCTAssertEqual(store.progress.currency, 660)
         XCTAssertEqual(store.progress.highScores[1], 1_200)
         XCTAssertEqual(store.progress.stars[1], 2)
 
@@ -44,12 +45,27 @@ final class ProgressStoreTests: XCTestCase {
         store.complete(result)
         XCTAssertTrue(store.progress.achievements.contains("bowling_triple"))
         XCTAssertTrue(store.progress.achievements.contains("sky_launch"))
-        // +180 reward, +100 "first_shift" (won == true), +100 each for the two feats = +480.
+        // +180 reward, +50 "first_shift" (easy tier, won == true), +125 each for the two
+        // skill-tier feats (bowling_triple, sky_launch) = +480.
         XCTAssertEqual(store.progress.currency, startingCurrency + 480)
 
         // A second run reporting the same feats shouldn't pay out again.
         store.complete(LevelResult(levelID: 1, score: 500, stars: 1, reward: 180, won: true, defeats: 8, maxCombo: 3, wave: 3, feats: ["bowling_triple"]))
         XCTAssertEqual(store.progress.currency, startingCurrency + 480 + 180)
+    }
+
+    /// The whole point of tiering (see AchievementTier): a genuinely hard skill feat must pay out
+    /// more than a trivial first-clear achievement, not the same flat amount either used to grant.
+    func testHarderAchievementTiersPayMoreThanEasyOnes() {
+        XCTAssertEqual(Achievements.coinReward(for: "first_shift"), 50)
+        XCTAssertEqual(Achievements.coinReward(for: "chain_reaction_10"), 250)
+        XCTAssertEqual(Achievements.coinReward(for: "road_cleared"), 400)
+        XCTAssertGreaterThan(Achievements.coinReward(for: "chain_reaction_10"), Achievements.coinReward(for: "first_shift"))
+
+        let store = ProgressStore(defaults: defaults)
+        let startingCurrency = store.progress.currency
+        store.complete(LevelResult(levelID: 1, score: 100, stars: 0, reward: 0, won: false, defeats: 1, maxCombo: 1, wave: 1, feats: ["chain_reaction_10"]))
+        XCTAssertEqual(store.progress.currency, startingCurrency + 250)
     }
 
     func testUpgradePurchaseChargesCoinsAndCapsAtThree() {

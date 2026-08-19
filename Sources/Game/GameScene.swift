@@ -115,6 +115,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var lastObservedWaveForFeats = 0
     private var playerThrewThisWave = false
     private var playerThrownZombieGroundedThisWave = false
+    /// Achievement ids queued to display as the small delayed "unlocked" toast (see
+    /// showFeatToast) — a run can earn several feats within the same second, and draining this
+    /// one at a time keeps that from becoming another label stacked into the same instant as the
+    /// combo-event banner and score popup.
+    private var pendingFeatToasts: [String] = []
+    private var isDrainingFeatToasts = false
     /// Global walk-speed tuning knob, layered under every other speed multiplier (difficulty,
     /// wave ramp, sandbox slider) so it scales zombies uniformly without touching their relative
     /// per-kind balance.
@@ -258,7 +264,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // `wave` forward, so it doesn't need its own copy in both the endless and campaign paths.
         if wave != lastObservedWaveForFeats {
             if lastObservedWaveForFeats > 0, playerThrewThisWave, !playerThrownZombieGroundedThisWave {
-                achievedFeats.insert("graceful_wave")
+                recordFeat("graceful_wave")
             }
             lastObservedWaveForFeats = wave
             playerThrewThisWave = false
@@ -277,7 +283,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // SKY_LAUNCH: checked every frame while airborne (not just on landing/defeat) so it's
             // caught regardless of what happens next — surviving the fall, landing, or exiting off
             // a side boundary without ever triggering a ground contact.
-            if zombie.highestPoint > size.height { achievedFeats.insert("sky_launch") }
+            if zombie.highestPoint > size.height { recordFeat("sky_launch") }
             if !zombie.isGrabbed, !zombie.isThrown, zombieHasReachedHouse(zombie) {
                 zombieReachedHouse(zombie)
             } else if zombie.position.y < -170 || zombie.position.x < -220 || zombie.position.x > size.width + 220 {
@@ -859,7 +865,16 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// Every 5th endless wave (see the wave-transition check in `update(_:)`), freeze gameplay and
     /// hand the player three random perks — reusing `isGameplayPaused` rather than any new pause
     /// mechanism, since it already stops physics/actions and cancels any in-progress weapon drag.
+    /// Held back ~1s (run on `self`, not `world`, so it isn't affected by the pause it's about to
+    /// cause) rather than firing in the same frame as the wave/boss `announce()` banner: pausing
+    /// `world` immediately would otherwise freeze that banner visibly mid-fade underneath the
+    /// perk picker the instant it appears — one more label fighting for the player's attention at
+    /// the exact same moment.
     private func offerPerkChoices() {
+        run(.sequence([.wait(forDuration: 1.0), .run { [weak self] in self?.presentPerkChoices() }]))
+    }
+
+    private func presentPerkChoices() {
         pendingPerkChoices = Array(Perk.allCases.shuffled().prefix(3))
         isGameplayPaused = true
         notifyDelegate()
@@ -1012,7 +1027,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 // Tracked on the projectile itself (see incrementKillTally) so a bowling ball that
                 // rolls through several zombies knows this is its 2nd+ kill — that's ZOMBIE BOWLING.
                 let tally = incrementKillTally(on: weaponBody.node)
-                if weaponKind == .bowlingBall, tally >= 3 { achievedFeats.insert("bowling_triple") }
+                if weaponKind == .bowlingBall, tally >= 3 { recordFeat("bowling_triple") }
                 defeat(zombie, reason: .weapon, multiKillTally: tally, weaponKind: weaponKind)
             } else {
                 SoundManager.shared.playZombieVoice(for: zombie.kind, moment: .hurt, pan: audioPan(for: zombie))
@@ -1062,7 +1077,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                     shakeCamera(intensity: 0.4)
                 }
                 if zombie.damage(contact.collisionImpulse / 42) {
-                    if zombie.kind.isBoss { achievedFeats.insert("boss_friendly_fire") }
+                    if zombie.kind.isBoss { recordFeat("boss_friendly_fire") }
                     defeat(zombie, reason: .collision)
                 } else if zombie.canBeKnockedBack, let otherZombie {
                     knockback(zombie, awayFrom: otherZombie.position, magnitude: contact.collisionImpulse)
@@ -1439,7 +1454,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if power > 0.3 { shakeCamera(intensity: 0.2 + power * 1.1) }
         showScorePopup(at: point, score: killScore)
         if let event {
-            showComboEvent(event, at: point)
+            showComboEvent(event, at: point, power: power)
         } else {
             showCombo(at: point)
         }
@@ -1502,7 +1517,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 zombie.launch(with: radialImpulse(from: point, to: zombie.position, radius: radius, maxImpulse: 380, minImpulse: 140))
             }
         }
-        if killTally >= 10 { achievedFeats.insert("chain_reaction_10") }
+        if killTally >= 10 { recordFeat("chain_reaction_10") }
         playCombatVFX(.explosion, at: point, size: 270, direction: 1)
         SoundManager.shared.play(.explosion)
         SoundManager.shared.duckMusic(strength: 0.48, duration: 0.42)
@@ -1767,7 +1782,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 zombie.launch(with: radialImpulse(from: point, to: zombie.position, radius: radius, maxImpulse: maxImpulse, minImpulse: minImpulse))
             }
         }
-        if killTally >= 10 { achievedFeats.insert("chain_reaction_10") }
+        if killTally >= 10 { recordFeat("chain_reaction_10") }
         playCombatVFX(.explosion, at: point, size: radius * 1.7, direction: 1)
         SoundManager.shared.play(.explosion)
         SoundManager.shared.duckMusic(strength: 0.48, duration: 0.42)
@@ -2478,13 +2493,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         ]))
     }
 
-    /// The named-event banner (see ComboEvent) — bigger, bolder, and punchier than the plain
-    /// `×N COMBO` text it replaces for that kill, since it's calling out *how* the kill happened
-    /// rather than just a running count.
-    private func showComboEvent(_ event: ComboEvent, at point: CGPoint) {
+    /// The named-event banner (see ComboEvent) — the top of the on-kill feedback hierarchy: it
+    /// must always read as bigger and land faster than the score/combo popups underneath it and
+    /// the delayed achievement toast above it (see showFeatToast), since it's calling out *how*
+    /// the kill happened rather than just a running count or a longer-term unlock.
+    private func showComboEvent(_ event: ComboEvent, at point: CGPoint, power: CGFloat) {
         let label = SKLabelNode(fontNamed: "AvenirNext-Heavy")
         label.text = event.displayName
-        label.fontSize = 26
+        label.fontSize = 32 + power * 12
         label.fontColor = comboEventColor(event)
         label.horizontalAlignmentMode = .center
         label.position = CGPoint(x: point.x, y: min(size.height - 64, point.y + 56))
@@ -2493,8 +2509,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         label.zRotation = CGFloat.random(in: -0.05...0.05)
         world.addChild(label)
         label.run(.sequence([
-            .group([.scale(to: 1.18, duration: 0.09), .moveBy(x: 0, y: 10, duration: 0.09)]),
-            .scale(to: 1, duration: 0.07),
+            .group([.scale(to: 1.22, duration: 0.06), .moveBy(x: 0, y: 10, duration: 0.06)]),
+            .scale(to: 1, duration: 0.05),
             .wait(forDuration: 0.32),
             .group([.moveBy(x: 0, y: 24, duration: 0.42), .fadeOut(withDuration: 0.42), .scale(to: 0.85, duration: 0.42)]),
             .removeFromParent()
@@ -2549,6 +2565,58 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         sub.zPosition = 150
         world.addChild(sub)
         sub.run(.sequence([.fadeIn(withDuration: 0.16), .wait(forDuration: 0.65), .fadeOut(withDuration: 0.28), .removeFromParent()]))
+    }
+
+    /// Queues a feat/achievement for the small delayed toast (see drainFeatToastsIfNeeded), but
+    /// only the first time it's earned this run — several of the call sites (e.g. the per-frame
+    /// SKY_LAUNCH height check) would otherwise re-fire every frame the condition still holds.
+    private func recordFeat(_ id: String) {
+        guard achievedFeats.insert(id).inserted else { return }
+        pendingFeatToasts.append(id)
+        drainFeatToastsIfNeeded()
+    }
+
+    /// The three feedback layers on a single kill are deliberately never the same size or the
+    /// same moment: the named combo-event banner is immediate and largest, the score/combo
+    /// popups are secondary, and this progression toast is smallest, screen-anchored (not at the
+    /// kill point), and held back a beat before it appears — so a kill that happens to trigger an
+    /// achievement never reads as three labels landing on top of each other at once.
+    private func drainFeatToastsIfNeeded() {
+        guard !isDrainingFeatToasts, !pendingFeatToasts.isEmpty else { return }
+        isDrainingFeatToasts = true
+        let id = pendingFeatToasts.removeFirst()
+        let title = Achievements.title(for: id) ?? id
+        run(.sequence([
+            .wait(forDuration: 0.6),
+            .run { [weak self] in self?.showFeatToast(title: title) },
+            .wait(forDuration: 1.4),
+            .run { [weak self] in
+                guard let self else { return }
+                self.isDrainingFeatToasts = false
+                self.drainFeatToastsIfNeeded()
+            }
+        ]))
+    }
+
+    /// Added directly to the scene (screen space), not `world` (which shakes with impacts and
+    /// scrolls with the camera) — same trick bossHUD uses, so this toast holds still in its own
+    /// corner of the screen regardless of what's happening in the fight underneath it.
+    private func showFeatToast(title: String) {
+        let label = SKLabelNode(fontNamed: "AvenirNext-DemiBold")
+        label.text = "🏆 \(title) Unlocked"
+        label.fontSize = 15
+        label.fontColor = SKColor(red: 1.0, green: 0.82, blue: 0.4, alpha: 1)
+        label.horizontalAlignmentMode = .center
+        label.position = CGPoint(x: size.width / 2, y: size.height - 108)
+        label.alpha = 0
+        label.zPosition = 200
+        addChild(label)
+        label.run(.sequence([
+            .fadeIn(withDuration: 0.25),
+            .wait(forDuration: 1.1),
+            .fadeOut(withDuration: 0.35),
+            .removeFromParent()
+        ]))
     }
 
     private func shakeCamera(intensity: CGFloat = 1) {
