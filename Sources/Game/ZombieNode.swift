@@ -257,6 +257,10 @@ final class ZombieNode: SKNode {
     var currentAnimationState: ZombieAnimationState { state }
     var healthFraction: CGFloat { max(0, health / maximumHealth) }
     var canBeGrabbed: Bool { !kind.isBoss || bossIsStunned }
+    /// Only a plainly-walking zombie can be sent into a knockback launch — mid-air, grabbed,
+    /// frozen, attacking, or already-recovering zombies own their own physics/state transitions
+    /// and a launch() here would fight them.
+    var canBeKnockedBack: Bool { state == .walking }
 
     var hasCompleteAnimationRig: Bool {
         sprites.count == RigPart.allCases.count && sprites.values.allSatisfy {
@@ -301,10 +305,14 @@ final class ZombieNode: SKNode {
         physicsBody = SKPhysicsBody(rectangleOf: physicsSize, center: CGPoint(x: 0, y: -kind.size.height * 0.04))
         physicsBody?.isDynamic = false
         physicsBody?.allowsRotation = true
-        physicsBody?.restitution = kind == .brute || kind.isBoss ? 0.16 : 0.30
-        physicsBody?.friction = 0.74
-        physicsBody?.linearDamping = 0.17
-        physicsBody?.angularDamping = 0.34
+        // Bumped from 0.16/0.30 and friction/damping loosened for a bouncier, more chaotic
+        // Zombie Smash-style landing/tumble — see release()/launch() for the matching wider
+        // spin range, and GameScene.knockback for the new non-lethal-hit launches this now
+        // needs to sell (a stiff, high-friction body reads as barely reacting to a hit).
+        physicsBody?.restitution = kind == .brute || kind.isBoss ? 0.24 : 0.40
+        physicsBody?.friction = 0.58
+        physicsBody?.linearDamping = 0.12
+        physicsBody?.angularDamping = 0.24
         physicsBody?.mass = kind.isBoss ? 4.2 : (kind == .brute ? 2.4 : (kind == .crawler ? 0.75 : 1.1))
         physicsBody?.categoryBitMask = PhysicsCategory.zombie
         physicsBody?.collisionBitMask = PhysicsCategory.ground | PhysicsCategory.boundary | PhysicsCategory.zombie | PhysicsCategory.weapon
@@ -566,7 +574,9 @@ final class ZombieNode: SKNode {
         physicsBody?.isDynamic = true
         physicsBody?.affectedByGravity = true
         physicsBody?.velocity = CGVector(dx: velocity.dx * powerMultiplier / kind.throwResistance, dy: velocity.dy * powerMultiplier / kind.throwResistance)
-        physicsBody?.angularVelocity = max(-8, min(8, -velocity.dx / 175))
+        // Widened from ±8 and given a random jitter on top of the dx-derived spin so throws
+        // tumble more and don't all rotate at an identical, predictable rate.
+        physicsBody?.angularVelocity = max(-11, min(11, -velocity.dx / 160 + CGFloat.random(in: -1.8...1.8)))
         rig.run(.scale(to: 1, duration: 0.08), withKey: "grabScale")
     }
 
@@ -579,7 +589,13 @@ final class ZombieNode: SKNode {
         highestPoint = position.y
         physicsBody?.isDynamic = true
         physicsBody?.affectedByGravity = true
-        physicsBody?.applyImpulse(impulse)
+        // Same throwResistance damping release() applies to a player flick, so a bowling ball or
+        // explosion sends a riot/butcher/colossus flying noticeably less far than a regular
+        // zombie — and a spin kick, since applyImpulse alone (no offset point) imparts no torque
+        // and used to leave explosion/collision knockbacks flying dead straight with no tumble.
+        let scaled = CGVector(dx: impulse.dx / kind.throwResistance, dy: impulse.dy / kind.throwResistance)
+        physicsBody?.applyImpulse(scaled)
+        physicsBody?.angularVelocity = max(-10, min(10, -scaled.dx / 55 + CGFloat.random(in: -2.2...2.2)))
     }
 
     func playImpact(reducedMotion: Bool) {
@@ -842,15 +858,15 @@ final class ZombieNode: SKNode {
         debris.xScale = xScale
         debris.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: max(8, sprite.size.width * 0.62), height: max(8, sprite.size.height * 0.62)))
         debris.physicsBody?.mass = part == .head ? 0.46 : 0.34
-        debris.physicsBody?.restitution = 0.38
-        debris.physicsBody?.friction = 0.82
+        debris.physicsBody?.restitution = 0.48
+        debris.physicsBody?.friction = 0.68
         debris.physicsBody?.categoryBitMask = PhysicsCategory.none
         debris.physicsBody?.collisionBitMask = PhysicsCategory.ground | PhysicsCategory.boundary
         parent.addChild(debris)
 
         let direction: CGFloat = approachesFromLeft ? -1 : 1
-        debris.physicsBody?.applyImpulse(CGVector(dx: direction * CGFloat.random(in: 42...92), dy: CGFloat.random(in: 78...142)))
-        debris.physicsBody?.angularVelocity = CGFloat.random(in: -6...6)
+        debris.physicsBody?.applyImpulse(CGVector(dx: direction * CGFloat.random(in: 55...115), dy: CGFloat.random(in: 95...165)))
+        debris.physicsBody?.angularVelocity = CGFloat.random(in: -8...8)
         debris.run(.sequence([.wait(forDuration: 2.2), .fadeOut(withDuration: 0.55), .removeFromParent()]))
 
         sprite.removeFromParent()
@@ -973,8 +989,8 @@ final class ZombieNode: SKNode {
             debris.xScale = xScale
             debris.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: source.size.width * 0.7, height: source.size.height * 0.7))
             debris.physicsBody?.mass = kind.isBoss ? 0.9 : 0.38
-            debris.physicsBody?.restitution = 0.46
-            debris.physicsBody?.friction = 0.8
+            debris.physicsBody?.restitution = 0.55
+            debris.physicsBody?.friction = 0.65
             debris.physicsBody?.categoryBitMask = PhysicsCategory.none
             debris.physicsBody?.collisionBitMask = PhysicsCategory.ground | PhysicsCategory.boundary
             return debris

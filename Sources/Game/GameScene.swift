@@ -796,6 +796,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 defeat(zombie, reason: .weapon)
             } else {
                 SoundManager.shared.playZombieVoice(for: zombie.kind, moment: .hurt, pan: audioPan(for: zombie))
+                // A walking zombie's body is kinematic (isDynamic == false, see ZombieNode.init),
+                // so without this a weapon that doesn't kill would just bounce off it and the
+                // zombie would keep walking as if nothing happened. Launching it off the weapon's
+                // own velocity instead sells the hit and can chain into further collisions.
+                if zombie.canBeKnockedBack, let weaponBody = bodies.first(where: { $0.categoryBitMask == PhysicsCategory.weapon }) {
+                    knockback(zombie, impulse: CGVector(dx: weaponBody.velocity.dx * 0.32, dy: abs(weaponBody.velocity.dy) * 0.24 + 90))
+                }
             }
             return
         }
@@ -813,12 +820,38 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         if bodies.allSatisfy({ $0.categoryBitMask == PhysicsCategory.zombie }), contact.collisionImpulse > 18 {
             playCombatVFX(.zombieSplatter, at: contact.contactPoint, size: 82, direction: contact.contactNormal.dx >= 0 ? 1 : -1)
-            for body in bodies {
-                if let zombie = body.node as? ZombieNode, !zombie.isDefeated, zombie.damage(contact.collisionImpulse / 42) {
+            let zombieA = bodies[0].node as? ZombieNode
+            let zombieB = bodies[1].node as? ZombieNode
+            // A thrown zombie plowing into a walking one used to just tick damage on both — the
+            // walking one is kinematic (see ZombieNode.init) so it never actually got pushed.
+            // Launching the survivor away from whichever body it collided with turns this into a
+            // real bowling-pin chain reaction instead of a stationary hitbox.
+            for (zombie, otherZombie) in [(zombieA, zombieB), (zombieB, zombieA)] {
+                guard let zombie, !zombie.isDefeated else { continue }
+                if zombie.damage(contact.collisionImpulse / 42) {
                     defeat(zombie, reason: .collision)
+                } else if zombie.canBeKnockedBack, let otherZombie {
+                    knockback(zombie, awayFrom: otherZombie.position, magnitude: contact.collisionImpulse)
                 }
             }
         }
+    }
+
+    /// Launches a currently-walking zombie into the same airborne/land/recover flow a player
+    /// flick uses (see ZombieNode.launch), clamped to a readable stagger-hop rather than a full
+    /// screen-length flight. `impulse` is a direct directional push (e.g. off a weapon's own
+    /// velocity); the `awayFrom:` overload derives direction from another body's position.
+    private func knockback(_ zombie: ZombieNode, impulse: CGVector) {
+        let dx = max(-360, min(360, impulse.dx))
+        let dy = max(90, min(320, impulse.dy))
+        zombie.launch(with: CGVector(dx: dx, dy: dy))
+    }
+
+    private func knockback(_ zombie: ZombieNode, awayFrom point: CGPoint, magnitude: CGFloat) {
+        let dx = zombie.position.x - point.x
+        let sign: CGFloat = dx == 0 ? (zombie.approachesFromLeft ? -1 : 1) : (dx > 0 ? 1 : -1)
+        let power = min(300, max(90, magnitude * 3.2))
+        knockback(zombie, impulse: CGVector(dx: sign * power, dy: power * 0.6))
     }
 
     private enum DefeatReason { case impact, collision, weapon, trap, thrownOut, explosion }
@@ -1631,9 +1664,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 debris.position = zombie.position
                 debris.zPosition = 28
                 world.addChild(debris)
-                let spread = CGFloat(index - 2) * 34 + CGFloat.random(in: -22...22)
-                debris.physicsBody?.applyImpulse(CGVector(dx: spread * impulseScale, dy: CGFloat.random(in: 70...150) * impulseScale))
-                debris.physicsBody?.angularVelocity = CGFloat.random(in: -5...5)
+                let spread = CGFloat(index - 2) * 42 + CGFloat.random(in: -26...26)
+                debris.physicsBody?.applyImpulse(CGVector(dx: spread * impulseScale, dy: CGFloat.random(in: 90...180) * impulseScale))
+                debris.physicsBody?.angularVelocity = CGFloat.random(in: -7...7)
                 debris.run(.sequence([.wait(forDuration: 2.4), .fadeOut(withDuration: 0.5), .removeFromParent()]))
             }
         }
