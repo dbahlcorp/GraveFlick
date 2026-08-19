@@ -871,10 +871,23 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // bypass the usual "survives its first ordinary hit" floor — that's the whole point of
         // brittleness — while a normal zombie's first hit is unaffected.
         let damage = rawDamage * zombie.frozenImpactDamageMultiplier
-        SoundManager.shared.play(.impact)
-        zombie.playImpact(reducedMotion: settings.reducedMotion)
+        // 0...1.4, see ZombieNode.lastImpactPower — the whole point of the flick: a tiny toss
+        // barely registers, a monster flick should feel violently, cartoonishly satisfying.
+        let power = zombie.lastImpactPower
+        SoundManager.shared.play(.impact, intensity: 0.7 + power * 0.9)
+        zombie.playImpact(reducedMotion: settings.reducedMotion, power: power)
         let impactPoint = CGPoint(x: zombie.position.x, y: groundY + 8)
-        playCombatVFX(.pavementImpact, at: impactPoint, size: min(210, 120 + damage * 36), direction: zombie.physicsBody?.velocity.dx.sign == .minus ? -1 : 1)
+        playCombatVFX(.pavementImpact, at: impactPoint, size: min(230, 120 + damage * 30 + power * 70), direction: zombie.physicsBody?.velocity.dx.sign == .minus ? -1 : 1)
+        spawnPavementCracks(at: impactPoint, power: power)
+        if power > 0.3 {
+            shakeCamera(intensity: 0.25 + power * 1.35)
+            runHaptic(impactHapticStyle(for: power))
+        }
+        if power > 0.55 {
+            // A second, landing-moment hit-stop — separate from releaseZombie's release-moment
+            // "snap" — so a hard slam gets weight both at the throw and at the payoff.
+            hitStop(duration: min(0.14, 0.05 + Double(power) * 0.09), slowFactor: max(0.12, 0.4 - power * 0.22))
+        }
         if zombie.damage(damage, canOverkill: zombie.isFrozenSolid) {
             defeat(zombie, reason: .impact)
         } else {
@@ -906,8 +919,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         var velocity = FlickMath.velocity(from: samples)
         if hypot(velocity.dx, velocity.dy) < 140 { velocity.dy = 180 }
         zombie.release(with: velocity, powerMultiplier: flickMultiplier)
-        if hypot(velocity.dx, velocity.dy) > 1_850 {
-            hitStop(duration: 0.16, slowFactor: 0.35)
+        // A confirming hit-stop "snap" right at the moment of a hard flick, scaled continuously
+        // with zombie.lastImpactPower instead of the old fixed 1,850pt/s on-or-off cutoff — the
+        // (usually bigger) landing-moment payoff happens separately in resolveImpact/defeat.
+        if zombie.lastImpactPower > 0.65 {
+            let power = zombie.lastImpactPower
+            hitStop(duration: min(0.18, 0.08 + Double(power) * 0.09), slowFactor: max(0.18, 0.42 - power * 0.2))
         }
         zombie.zPosition = 20
     }
@@ -1108,6 +1125,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         specialCharge = min(1, specialCharge + (zombie.kind.isBoss ? 0.5 : (zombie.kind == .brute ? 0.22 : 0.12)))
         let point = zombie.position
         let volatile = zombie.kind == .volatile
+        // 0 unless this kill was the direct result of a flick/knockback landing or slamming into
+        // something (see ZombieNode.lastImpactPower) — a weapon/trap/collision kill with no throw
+        // of its own keeps the previous fixed feel below.
+        let power = zombie.lastImpactPower
         if settings.goreEnabled {
             spawnPhysicsDebris(from: zombie, reason: reason)
         }
@@ -1131,16 +1152,21 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if reason == .thrownOut {
             burst(at: point, color: .cyan)
         } else if reason != .explosion {
-            playCombatVFX(.zombieSplatter, at: point, size: zombie.kind.isBoss ? 210 : (zombie.kind == .brute ? 156 : 118), direction: zombie.approachesFromLeft ? -1 : 1)
+            let baseSplatterSize: CGFloat = zombie.kind.isBoss ? 210 : (zombie.kind == .brute ? 156 : 118)
+            playCombatVFX(.zombieSplatter, at: point, size: baseSplatterSize + power * 48, direction: zombie.approachesFromLeft ? -1 : 1)
         }
-        SoundManager.shared.play(.defeat, comboScale: combo)
+        SoundManager.shared.play(.defeat, comboScale: combo, intensity: 0.8 + power * 0.75)
         if zombie.kind.isBoss || zombie.kind.alwaysVocalizesOnDefeat || Int.random(in: 0..<3) == 0 {
             SoundManager.shared.playZombieVoice(for: zombie.kind, moment: .defeat, pan: audioPan(for: zombie))
         }
-        runHaptic(.medium)
+        // A flick/knockback-driven kill scales its haptic and screen shake with how hard it was
+        // actually hit instead of every kill feeling identically "medium" — a bare stumble kill
+        // reads lighter, a monster-flick slam kill hits noticeably harder.
+        runHaptic(power > 0 ? impactHapticStyle(for: power) : .medium)
+        if power > 0.3 { shakeCamera(intensity: 0.2 + power * 1.1) }
         showScorePopup(at: point, score: killScore)
         showCombo(at: point)
-        hitStop(duration: min(0.09, 0.045 + Double(combo) * 0.004))
+        hitStop(duration: min(0.13, 0.045 + Double(combo) * 0.004 + Double(power) * 0.05))
         if Int.random(in: 0..<5) == 0 { spawnPickup(at: point) }
         if volatile, reason != .explosion { explodeVolatile(at: point) }
     }
@@ -2180,5 +2206,37 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func runHaptic(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {
         guard settings.hapticsEnabled else { return }
         UIImpactFeedbackGenerator(style: style).impactOccurred()
+    }
+
+    /// Stumble/knockback/slam/monster haptic tiers matching ZombieNode.lastImpactPower's 0...1.4
+    /// scale, so a tiny flick barely taps and a monster slam hits as hard as UIKit allows.
+    private func impactHapticStyle(for power: CGFloat) -> UIImpactFeedbackGenerator.FeedbackStyle {
+        switch power {
+        case ..<0.18: .light
+        case ..<0.5: .medium
+        case ..<0.85: .heavy
+        default: .rigid
+        }
+    }
+
+    /// Small persistent crack marks in the pavement at a hard flick-impact point — distinct from
+    /// `damageScenery` (which is specific to the diner's siding), purely a floor-level payoff for
+    /// a satisfying slam. Gated to real impacts (see `resolveImpact`) so a tiny stumble stays quiet.
+    private func spawnPavementCracks(at point: CGPoint, power: CGFloat) {
+        guard !settings.reducedMotion else { return }
+        let count = power < 0.45 ? 0 : (power < 0.85 ? 2 : 4)
+        guard count > 0 else { return }
+        for _ in 0..<count {
+            let length = CGFloat.random(in: 14...26) * (0.85 + power * 0.4)
+            let crack = SKShapeNode(rectOf: CGSize(width: length, height: 2.4), cornerRadius: 1.2)
+            crack.fillColor = .black.withAlphaComponent(0.34)
+            crack.strokeColor = .clear
+            crack.zRotation = CGFloat.random(in: 0...(.pi))
+            crack.position = CGPoint(x: point.x + CGFloat.random(in: -24...24), y: groundY + CGFloat.random(in: -3...5))
+            crack.zPosition = 6
+            crack.alpha = 0
+            world.addChild(crack)
+            crack.run(.sequence([.fadeAlpha(to: 0.85, duration: 0.05), .wait(forDuration: 3.2), .fadeOut(withDuration: 0.8), .removeFromParent()]))
+        }
     }
 }

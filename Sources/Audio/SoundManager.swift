@@ -15,7 +15,7 @@ final class SoundManager {
     private struct ToneSpec {
         var frequency: Double
         let duration: Double
-        let volume: Float
+        var volume: Float
         /// Ratio the frequency sweeps to by the end of the tone (1 = no sweep, <1 = downward "thud", >1 = upward "chirp").
         var pitchSweep: Double = 1
         /// 0 = pure tone, 1 = pure filtered noise. Used for thuds/impacts that need body beyond a sine wave.
@@ -351,7 +351,11 @@ final class SoundManager {
 
     /// - Parameter comboScale: raises the pitch a semitone-ish step per combo hit, the classic
     ///   escalating-reward cue for chained defeats. Ignored by effects that aren't combo-driven.
-    func play(_ effect: Effect, comboScale: Int = 1) {
+    /// - Parameter intensity: scales an `.impact`/`.defeat` hit's volume up and pitch down for a
+    ///   heavier-feeling thud on a hard flick slam versus a light tap on a gentle one. 1 = no
+    ///   change; ignored by every other effect. See ZombieNode.lastImpactPower for how this is
+    ///   derived from actual throw/knockback speed.
+    func play(_ effect: Effect, comboScale: Int = 1, intensity: CGFloat = 1) {
         guard settings.soundEnabled, ensureEffectsEngine() else { return }
         guard let node = effectNodes.first(where: { !$0.isPlaying }) else { return }
 
@@ -381,6 +385,12 @@ final class SoundManager {
             var toneSpec = spec(for: effect)
             if effect == .defeat {
                 toneSpec.frequency *= pow(1.05, Double(min(comboScale - 1, 14)))
+            }
+            if (effect == .impact || effect == .defeat), intensity != 1 {
+                let punch = Double(max(0.4, min(2.4, intensity)))
+                toneSpec.volume = min(1, toneSpec.volume * Float(punch))
+                toneSpec.frequency /= pow(punch, 0.35)
+                toneSpec.noiseMix = min(1, toneSpec.noiseMix + Float(max(0, punch - 1)) * 0.18)
             }
             buffer = tone(toneSpec)
         }

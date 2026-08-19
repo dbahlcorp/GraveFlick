@@ -227,6 +227,14 @@ final class ZombieNode: SKNode {
     var frozenImpactDamageMultiplier: CGFloat { isFrozenSolid ? 3.5 : 1 }
     var hasResolvedImpact = false
     var highestPoint: CGFloat = 0
+    /// Normalized ~0...1.4 severity of the throw/knockback that most recently sent this zombie
+    /// airborne (1 = the hardest possible ordinary flick), set by release()/launch() and cleared
+    /// by resumeWalking() once it lands safely. GameScene reads it when this zombie hits the
+    /// ground or is defeated, to scale impact feedback (screen shake, haptics, sound, particles,
+    /// hit-stop, pavement cracks) to how hard it actually got hit instead of every impact feeling
+    /// the same. Cleared on a safe landing so a later, unrelated kill (weapon/trap/collision)
+    /// doesn't inherit a stale reading from an old throw.
+    private(set) var lastImpactPower: CGFloat = 0
     private(set) var health: CGFloat
     private let maximumHealth: CGFloat
     private let movementMultiplier: CGFloat
@@ -598,7 +606,12 @@ final class ZombieNode: SKNode {
     func release(with velocity: CGVector, powerMultiplier: CGFloat) {
         guard !isDefeated else { return }
         beginAirborne()
-        physicsBody?.velocity = CGVector(dx: velocity.dx * powerMultiplier / kind.throwResistance, dy: velocity.dy * powerMultiplier / kind.throwResistance)
+        let launchVelocity = CGVector(dx: velocity.dx * powerMultiplier / kind.throwResistance, dy: velocity.dy * powerMultiplier / kind.throwResistance)
+        physicsBody?.velocity = launchVelocity
+        // Normalized against the flick speed cap (GameRules.maximumFlickSpeed) using the actual
+        // post-resistance launch speed, so a fully-resisted riot/butcher/colossus reads as a
+        // weaker hit even off a maxed-out flick, matching what the player actually sees fly.
+        lastImpactPower = min(1.4, hypot(launchVelocity.dx, launchVelocity.dy) / GameRules.maximumFlickSpeed)
         // Widened from ±8 and given a random jitter on top of the dx-derived spin so throws
         // tumble more and don't all rotate at an identical, predictable rate.
         physicsBody?.angularVelocity = max(-11, min(11, -velocity.dx / 160 + CGFloat.random(in: -1.8...1.8)))
@@ -623,24 +636,33 @@ final class ZombieNode: SKNode {
         // Spin kick — applyImpulse alone (no offset point) imparts no torque, which used to leave
         // explosion/collision knockbacks flying dead straight with no tumble.
         physicsBody?.angularVelocity = max(-10, min(10, -impulse.dx / 55 + CGFloat.random(in: -2.2...2.2)))
+        // Impulse and flick velocity aren't directly comparable units, but knockback()'s clamped
+        // ranges and the explosion radialImpulse constants both land roughly in 90...760, so 500
+        // is a reasonable estimate to put a knockback-driven impact on the same 0...1.4 power
+        // scale a player flick produces.
+        lastImpactPower = min(1.4, hypot(impulse.dx, impulse.dy) / 500)
     }
 
-    func playImpact(reducedMotion: Bool) {
+    /// `power` (0...1.4, see `lastImpactPower`) exaggerates the squash/rebound for a harder-hit
+    /// landing — a tiny stumble barely dips, a monster slam flattens dramatically — so the same
+    /// impact pose reads as proportionally more violent instead of identical at every speed.
+    func playImpact(reducedMotion: Bool, power: CGFloat = 0) {
         guard !isDefeated else { return }
         state = .impact
         shadowNode.alpha = 0.42
         guard !reducedMotion else { return }
 
+        let punch = max(0, min(1.4, power))
         rig.removeAction(forKey: "impact")
         let squash = SKAction.group([
-            .scaleX(to: 1.24, duration: 0.055),
-            .scaleY(to: 0.68, duration: 0.055),
-            .moveBy(x: 0, y: -4, duration: 0.055)
+            .scaleX(to: 1.24 + punch * 0.20, duration: 0.055),
+            .scaleY(to: 0.68 - punch * 0.16, duration: 0.055),
+            .moveBy(x: 0, y: -4 - punch * 3, duration: 0.055)
         ])
         let rebound = SKAction.group([
-            .scaleX(to: 0.94, duration: 0.09),
-            .scaleY(to: 1.08, duration: 0.09),
-            .moveBy(x: 0, y: 4, duration: 0.09)
+            .scaleX(to: 0.94 - punch * 0.06, duration: 0.09),
+            .scaleY(to: 1.08 + punch * 0.12, duration: 0.09),
+            .moveBy(x: 0, y: 4 + punch * 2, duration: 0.09)
         ])
         let settle = SKAction.group([
             .scaleX(to: 1, duration: 0.12),
@@ -665,6 +687,10 @@ final class ZombieNode: SKNode {
         physicsBody?.affectedByGravity = false
         physicsBody?.velocity = .zero
         physicsBody?.angularVelocity = 0
+        // Cleared on a safe landing so a later, unrelated kill (weapon/trap/collision, with no
+        // throw of its own) doesn't inherit this throw's impact-feedback power (see
+        // lastImpactPower).
+        lastImpactPower = 0
         // Unconditional, not max(position.y, ...): physics is disabled right after this and never
         // touches position.y again until the next throw, so if the impact bounce left the zombie
         // still elevated when this fires, max() would let it walk stuck at that height forever.
