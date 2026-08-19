@@ -68,23 +68,54 @@ final class GameRulesTests: XCTestCase {
         XCTAssertLessThanOrEqual(fourth, 14)
     }
 
-    func testExpandedRosterContainsThreeNewRegularsAndTwoUniqueBosses() {
+    func testExpandedRosterContainsThreeNewRegularsAndThreeUniqueBosses() {
         XCTAssertTrue(ZombieKind.regularCases.contains(.waitress))
         XCTAssertTrue(ZombieKind.regularCases.contains(.riot))
         XCTAssertTrue(ZombieKind.regularCases.contains(.groundskeeper))
         XCTAssertFalse(ZombieKind.regularCases.contains(.butcher))
         XCTAssertFalse(ZombieKind.regularCases.contains(.colossus))
+        XCTAssertFalse(ZombieKind.regularCases.contains(.bouncer))
         XCTAssertTrue(ZombieKind.butcher.isBoss)
         XCTAssertTrue(ZombieKind.colossus.isBoss)
+        XCTAssertTrue(ZombieKind.bouncer.isBoss)
         XCTAssertGreaterThan(ZombieKind.colossus.hitPoints, ZombieKind.butcher.hitPoints)
         XCTAssertGreaterThan(ZombieKind.butcher.hitPoints, ZombieKind.riot.hitPoints)
+    }
+
+    /// THE BOUNCER's whole point: unlike every other boss (grabbable once stunned by cumulative
+    /// damage), it can't be grabbed at all until three armor plates are knocked off — see
+    /// ZombieNode.knockArmorPlate, called from GameScene when another zombie is thrown into it.
+    func testBouncerArmorGatesGrabbability() {
+        let bouncer = ZombieNode(kind: .bouncer, approachesFromLeft: true)
+        XCTAssertTrue(bouncer.isArmored)
+        XCTAssertEqual(bouncer.armorPlateCount, 3)
+        XCTAssertFalse(bouncer.canBeGrabbed)
+
+        XCTAssertTrue(bouncer.knockArmorPlate())
+        XCTAssertTrue(bouncer.knockArmorPlate())
+        XCTAssertTrue(bouncer.isArmored)
+        XCTAssertFalse(bouncer.canBeGrabbed)
+
+        XCTAssertTrue(bouncer.knockArmorPlate())
+        XCTAssertFalse(bouncer.isArmored)
+        XCTAssertEqual(bouncer.armorPlateCount, 0)
+        XCTAssertTrue(bouncer.canBeGrabbed)
+
+        // No plates left — further knocks are no-ops, not a crash or a negative count.
+        XCTAssertFalse(bouncer.knockArmorPlate())
+        XCTAssertEqual(bouncer.armorPlateCount, 0)
     }
 
     func testBossWavesAlternateUniqueBosses() {
         XCTAssertNil(GameRules.bossKind(forWave: 4))
         XCTAssertEqual(GameRules.bossKind(forWave: 5), .butcher)
         XCTAssertEqual(GameRules.bossKind(forWave: 10), .colossus)
-        XCTAssertEqual(GameRules.bossKind(forWave: 15), .butcher)
+        // Three-way rotation as of THE BOUNCER: 15 is a multiple of both 5 and 10's "every other"
+        // pattern, but bossKind checks isMultiple(of: 15) first specifically so this slot goes to
+        // the third boss instead of falling through to butcher.
+        XCTAssertEqual(GameRules.bossKind(forWave: 15), .bouncer)
+        XCTAssertEqual(GameRules.bossKind(forWave: 20), .colossus)
+        XCTAssertEqual(GameRules.bossKind(forWave: 25), .butcher)
         XCTAssertNil(GameRules.storyBossKind(levelID: 3, wave: 4, totalWaves: 4))
         XCTAssertEqual(GameRules.storyBossKind(levelID: 4, wave: 5, totalWaves: 5), .butcher)
         XCTAssertEqual(GameRules.storyBossKind(levelID: 5, wave: 6, totalWaves: 6), .colossus)

@@ -924,8 +924,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
 
+    /// Picks a random boss kind other than `kind` for DOUBLE BOSS — a list rather than a hardcoded
+    /// pair so it automatically includes whatever boss kinds exist as more get added.
     private func otherBossKind(than kind: ZombieKind) -> ZombieKind {
-        kind == .butcher ? .colossus : .butcher
+        ZombieKind.allCases.filter { $0.isBoss && $0 != kind }.randomElement() ?? .butcher
     }
 
     func didBegin(_ contact: SKPhysicsContact) {
@@ -992,6 +994,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // real bowling-pin chain reaction instead of a stationary hitbox.
             for (zombie, otherZombie) in [(zombieA, zombieB), (zombieB, zombieA)] {
                 guard let zombie, !zombie.isDefeated else { continue }
+                // THE BOUNCER: armor only comes off when another zombie is genuinely thrown or
+                // knocked into it (isThrown), not just incidental crowd-pressure contact — weapons
+                // and traps never strip it either, only this. That's deliberate: the whole point
+                // is a boss that makes the player actually use the flick/knockback systems on
+                // other zombies instead of just pouring more weapon damage into a health bar.
+                if zombie.kind == .bouncer, zombie.isArmored, let otherZombie, otherZombie.isThrown {
+                    zombie.knockArmorPlate()
+                    playCombatVFX(.zombieSplatter, at: contact.contactPoint, size: 64, direction: 1)
+                    SoundManager.shared.play(.armorBreak)
+                    shakeCamera(intensity: 0.4)
+                }
                 if zombie.damage(contact.collisionImpulse / 42) {
                     defeat(zombie, reason: .collision)
                 } else if zombie.canBeKnockedBack, let otherZombie {
@@ -1240,6 +1253,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         zombie.zPosition = 10
         world.addChild(zombie)
         zombie.onArmorBroken = { SoundManager.shared.play(.armorBreak) }
+        zombie.onArmorFullyStripped = { [weak self, weak zombie] in
+            guard let self, let zombie else { return }
+            self.announce(text: "\(zombie.kind.displayName) IS EXPOSED!", color: .cyan)
+            SoundManager.shared.play(.armorBreak)
+            self.shakeCamera(intensity: 0.6)
+            self.runHaptic(.heavy)
+        }
         zombie.onBossPhaseChanged = { [weak self, weak zombie] phase in
             guard let self, let zombie else { return }
             SoundManager.shared.playBossPhase(phase, pan: self.audioPan(for: zombie))

@@ -12,20 +12,25 @@ enum ZombieKind: String, CaseIterable, Codable {
     case groundskeeper
     case butcher
     case colossus
+    case bouncer
 
     static let regularCases: [ZombieKind] = [.walker, .runner, .brute, .crawler, .armored, .volatile, .waitress, .riot, .groundskeeper]
 
-    var isBoss: Bool { self == .butcher || self == .colossus }
+    var isBoss: Bool { self == .butcher || self == .colossus || self == .bouncer }
 
     var displayName: String {
         switch self {
         case .butcher: "THE BUTCHER"
         case .colossus: "NEON COLOSSUS"
+        case .bouncer: "THE BOUNCER"
         default: rawValue.uppercased()
         }
     }
 
-    var assetName: String { rawValue }
+    /// The Bouncer has no art of its own — it reuses `riot`'s rig at boss scale (see ZombieNode's
+    /// armor-plate overlay for what actually makes it read as a distinct boss rather than a big
+    /// riot zombie).
+    var assetName: String { self == .bouncer ? ZombieKind.riot.rawValue : rawValue }
 
     /// Regular kinds are scaled to ~82% of the original art size, then shrunk again to ~55% of that
     /// on top (Zombie Smash-style small sprites so the play field reads as much larger) — physics
@@ -45,6 +50,10 @@ enum ZombieKind: String, CaseIterable, Codable {
         case .groundskeeper: CGSize(width: 40, height: 55)
         case .butcher: CGSize(width: 142, height: 164)
         case .colossus: CGSize(width: 154, height: 174)
+        // Deliberately stockier/smaller than the other two bosses — it reads as a wall of armor
+        // rather than a looming giant, which fits a boss whose whole identity is "can't be
+        // grabbed until you chip its armor away" rather than sheer size.
+        case .bouncer: CGSize(width: 118, height: 150)
         }
     }
 
@@ -61,6 +70,7 @@ enum ZombieKind: String, CaseIterable, Codable {
         case .groundskeeper: 46
         case .butcher: 22
         case .colossus: 18
+        case .bouncer: 26
         }
     }
 
@@ -77,6 +87,7 @@ enum ZombieKind: String, CaseIterable, Codable {
         case .groundskeeper: 9
         case .butcher: 44
         case .colossus: 68
+        case .bouncer: 54
         }
     }
 
@@ -88,7 +99,7 @@ enum ZombieKind: String, CaseIterable, Codable {
         case .runner, .waitress: 0.28
         case .walker, .crawler, .volatile: 0.38
         case .brute, .armored, .riot, .groundskeeper: 0.48
-        case .butcher, .colossus: 0
+        case .butcher, .colossus, .bouncer: 0
         }
     }
 
@@ -110,6 +121,7 @@ enum ZombieKind: String, CaseIterable, Codable {
         case .groundskeeper: 37
         case .butcher: 80
         case .colossus: 98
+        case .bouncer: 78
         }
     }
 
@@ -124,6 +136,7 @@ enum ZombieKind: String, CaseIterable, Codable {
         case .waitress: 165
         case .riot: 340
         case .groundskeeper: 220
+        case .bouncer: 1_900
         case .butcher: 1_500
         case .colossus: 2_200
         }
@@ -135,6 +148,7 @@ enum ZombieKind: String, CaseIterable, Codable {
     var dinerDamage: Int {
         if self == .butcher { return 14 }
         if self == .colossus { return 20 }
+        if self == .bouncer { return 17 }
         return self == .brute || self == .volatile || self == .groundskeeper ? 8 : 4
     }
 
@@ -143,6 +157,7 @@ enum ZombieKind: String, CaseIterable, Codable {
         case .riot: 1.25
         case .butcher: 1.8
         case .colossus: 2.15
+        case .bouncer: 1.9
         default: 1
         }
     }
@@ -152,6 +167,7 @@ enum ZombieKind: String, CaseIterable, Codable {
         case .riot: 0.6
         case .butcher: 0.72
         case .colossus: 0.58
+        case .bouncer: 0.65
         default: 1
         }
     }
@@ -161,6 +177,7 @@ enum ZombieKind: String, CaseIterable, Codable {
         case .riot: 0.55
         case .butcher: 0.8
         case .colossus: 0.45
+        case .bouncer: 0.6
         default: 1
         }
     }
@@ -266,10 +283,18 @@ final class ZombieNode: SKNode {
     private var bossStunDamage: CGFloat = 0
     private(set) var bossPhase = 1
     private var abilityTime: TimeInterval = 0
+    /// THE BOUNCER only: physical armor-plate overlays that must be knocked off one at a time by
+    /// another zombie being thrown/knocked into it (see GameScene.didBegin's zombie-zombie
+    /// collision branch) before it can be grabbed at all — a mechanic gate, not a health-threshold
+    /// cosmetic like `armorBroken` above. Empty for every other kind.
+    private var armorPlateNodes: [SKShapeNode] = []
+    private(set) var armorPlateCount = 0
+    var isArmored: Bool { armorPlateCount > 0 }
+    var onArmorFullyStripped: (() -> Void)?
 
     var currentAnimationState: ZombieAnimationState { state }
     var healthFraction: CGFloat { max(0, health / maximumHealth) }
-    var canBeGrabbed: Bool { !kind.isBoss || bossIsStunned }
+    var canBeGrabbed: Bool { kind == .bouncer ? !isArmored : (!kind.isBoss || bossIsStunned) }
     /// Only a plainly-walking zombie can be sent into a knockback launch — mid-air, grabbed,
     /// frozen, attacking, or already-recovering zombies own their own physics/state transitions
     /// and a launch() here would fight them. Bosses are excluded from casual knockback the same
@@ -306,6 +331,7 @@ final class ZombieNode: SKNode {
         addChild(shadowNode)
         addChild(rig)
         buildRig()
+        buildArmorPlates()
 
         healthBarTrack.fillColor = .black.withAlphaComponent(0.72)
         healthBarTrack.strokeColor = .white.withAlphaComponent(0.48)
@@ -384,6 +410,59 @@ final class ZombieNode: SKNode {
         applyRestPose()
     }
 
+    /// THE BOUNCER's whole identity: three plate overlays parented to `rig` (so they ride along
+    /// with its walk-bob/pose transforms like any other part) standing between it and
+    /// `canBeGrabbed`. No new art — riot's existing torso/shoulder silhouette already reads as
+    /// armored, so procedural shapes are enough to show progress being chipped away.
+    private func buildArmorPlates() {
+        guard kind == .bouncer else { return }
+        let torsoWidth = sprites[.torso]?.size.width ?? kind.size.width * 0.5
+        let torsoHeight = sprites[.torso]?.size.height ?? kind.size.height * 0.5
+        let positions = [
+            CGPoint(x: 0, y: torsoHeight * 0.16),
+            CGPoint(x: -torsoWidth * 0.30, y: torsoHeight * 0.30),
+            CGPoint(x: torsoWidth * 0.22, y: torsoHeight * 0.04)
+        ]
+        for point in positions {
+            let plate = SKShapeNode(rectOf: CGSize(width: torsoWidth * 0.38, height: torsoHeight * 0.24), cornerRadius: 4)
+            plate.fillColor = SKColor(red: 0.50, green: 0.53, blue: 0.58, alpha: 1)
+            plate.strokeColor = SKColor(red: 0.84, green: 0.88, blue: 0.92, alpha: 0.85)
+            plate.lineWidth = 1.5
+            plate.position = point
+            plate.zPosition = 8
+            plate.zRotation = CGFloat.random(in: -0.12...0.12)
+            rig.addChild(plate)
+            armorPlateNodes.append(plate)
+        }
+        armorPlateCount = armorPlateNodes.count
+    }
+
+    /// Called by GameScene when another zombie is genuinely thrown/knocked into the Bouncer (not
+    /// just incidental crowd contact — see the caller). Pops one plate off with a quick scatter,
+    /// and once the last one's gone, flags it grabbable via `canBeGrabbed` and fires
+    /// `onArmorFullyStripped` for GameScene to announce.
+    @discardableResult
+    func knockArmorPlate() -> Bool {
+        guard isArmored, let plate = armorPlateNodes.popLast() else { return false }
+        armorPlateCount -= 1
+        let destination = CGPoint(x: plate.position.x + CGFloat.random(in: -70...70), y: plate.position.y + CGFloat.random(in: 40...80))
+        plate.run(.sequence([
+            .group([.move(to: destination, duration: 0.32), .rotate(byAngle: CGFloat.random(in: -3...3), duration: 0.32), .fadeOut(withDuration: 0.34)]),
+            .removeFromParent()
+        ]))
+        hitReactionTime = 0.16
+        rig.run(.sequence([.colorize(with: .white, colorBlendFactor: 0.85, duration: 0.05), .colorize(withColorBlendFactor: 0, duration: 0.14)]))
+        if !isArmored {
+            sprites.values.forEach { $0.color = .cyan; $0.colorBlendFactor = 0.28 }
+            // Restores whatever tint should actually be showing (a phase color, or none) rather
+            // than blindly zeroing colorBlendFactor — same reasoning as the bossStun cleanup
+            // above, which this would otherwise fight if a phase change lands in the same window.
+            run(.sequence([.wait(forDuration: 0.5), .run { [weak self] in self?.applyBossPhaseTint() }]))
+            onArmorFullyStripped?()
+        }
+        return true
+    }
+
     private func configureRestPose() {
         guard let torso = sprites[.torso] else { return }
         let torsoWidth = torso.size.width
@@ -401,7 +480,7 @@ final class ZombieNode: SKNode {
         } else {
             let lean: CGFloat = kind == .runner || kind == .waitress ? -0.12 : (kind == .brute || kind.isBoss ? 0.03 : -0.035)
             let backShoulderX: CGFloat = switch kind {
-            case .brute, .armored, .volatile, .riot, .groundskeeper, .butcher, .colossus: -torsoWidth * 0.30
+            case .brute, .armored, .volatile, .riot, .groundskeeper, .butcher, .colossus, .bouncer: -torsoWidth * 0.30
             case .runner, .waitress: -torsoWidth * 0.16
             default: torsoWidth * 0.03
             }
@@ -762,7 +841,7 @@ final class ZombieNode: SKNode {
             attack = [.group([.moveBy(x: -direction * 10, y: 5, duration: 0.18), .scale(to: 1.08, duration: 0.18)]),
                       .group([.moveBy(x: direction * 27, y: -7, duration: 0.10), .scaleX(to: 1.15, duration: 0.10), .scaleY(to: 0.88, duration: 0.10)]),
                       .group([.moveBy(x: -direction * 17, y: 2, duration: 0.18), .scale(to: 1, duration: 0.18)])]
-        case .armored, .riot:
+        case .armored, .riot, .bouncer:
             setRotation(.frontArm, offset: -0.54)
             attack = [.group([.moveBy(x: -direction * 8, y: 0, duration: 0.14), .rotate(toAngle: -direction * 0.12, duration: 0.14)]),
                       .group([.moveBy(x: direction * 25, y: 0, duration: 0.09), .rotate(toAngle: direction * 0.22, duration: 0.09)]),
@@ -1005,6 +1084,7 @@ final class ZombieNode: SKNode {
             case .riot: 0.68
             case .butcher: 0.48
             case .colossus: 0.38
+            case .bouncer: 0.55
             default: 1
             }
             let styleForce: CGFloat = switch style {

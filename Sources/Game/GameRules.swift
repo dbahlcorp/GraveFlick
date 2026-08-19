@@ -72,6 +72,9 @@ enum GameRules {
 
     static func bossKind(forWave wave: Int) -> ZombieKind? {
         guard max(1, wave).isMultiple(of: 5) else { return nil }
+        // Three-way rotation, not just two — checked in this order so every 15-wave block sees
+        // all three once: 5→butcher, 10→colossus, 15→bouncer, 20→colossus, 25→butcher, 30→bouncer...
+        if wave.isMultiple(of: 15) { return .bouncer }
         return wave.isMultiple(of: 10) ? .colossus : .butcher
     }
 

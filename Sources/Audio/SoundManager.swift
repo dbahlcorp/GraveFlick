@@ -242,7 +242,7 @@ final class SoundManager {
     func playMovement(for kind: ZombieKind, pan: Float) {
         let spec: LayeredSpec = switch kind {
         case .crawler: LayeredSpec(low: 86, high: 460, duration: 0.24, volume: 0.07, noise: 0.72, sweep: 0.76, pulses: 1)
-        case .brute, .butcher, .colossus: LayeredSpec(low: 43, high: 124, duration: 0.30, volume: 0.13, noise: 0.50, sweep: 0.55, pulses: 1)
+        case .brute, .butcher, .colossus, .bouncer: LayeredSpec(low: 43, high: 124, duration: 0.30, volume: 0.13, noise: 0.50, sweep: 0.55, pulses: 1)
         case .armored, .riot: LayeredSpec(low: 62, high: 780, duration: 0.22, volume: 0.09, noise: 0.38, sweep: 0.72, pulses: 1)
         case .runner: LayeredSpec(low: 92, high: 330, duration: 0.14, volume: 0.07, noise: 0.55, sweep: 0.65, pulses: 2)
         default: LayeredSpec(low: 68, high: 240, duration: 0.20, volume: 0.065, noise: 0.62, sweep: 0.70, pulses: 1)
@@ -570,6 +570,7 @@ final class SoundManager {
         case .groundskeeper: ZombieVoiceSpec(fundamental: 72, duration: 0.52, volume: 0.18, pitchSweep: 0.76, noiseMix: 0.38, raspRate: 24, formant: 470)
         case .butcher: ZombieVoiceSpec(fundamental: 46, duration: 1.05, volume: 0.25, pitchSweep: 0.52, noiseMix: 0.38, raspRate: 14, formant: 270)
         case .colossus: ZombieVoiceSpec(fundamental: 36, duration: 1.24, volume: 0.27, pitchSweep: 0.46, noiseMix: 0.42, raspRate: 11, formant: 220)
+        case .bouncer: ZombieVoiceSpec(fundamental: 50, duration: 0.90, volume: 0.23, pitchSweep: 0.58, noiseMix: 0.32, raspRate: 15, formant: 300)
         }
 
         var result = base
