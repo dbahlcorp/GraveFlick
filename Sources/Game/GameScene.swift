@@ -780,11 +780,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             return
         }
 
-        if let zombie = zombieBody(in: bodies), bodies.contains(where: { $0.categoryBitMask == PhysicsCategory.weapon }) {
-            if let weaponKind = bodies.lazy.compactMap({ body -> WeaponKind? in
-                guard body.categoryBitMask == PhysicsCategory.weapon, let name = body.node?.name else { return nil }
-                return WeaponKind(rawValue: name)
-            }).first, let sound = impactSound(for: weaponKind) {
+        if let zombie = zombieBody(in: bodies), let weaponBody = bodies.first(where: { $0.categoryBitMask == PhysicsCategory.weapon }) {
+            if let weaponKind = weaponBody.node?.name.flatMap(WeaponKind.init(rawValue:)), let sound = impactSound(for: weaponKind) {
                 SoundManager.shared.play(sound)
             }
             playCombatVFX(.zombieSplatter, at: contact.contactPoint, size: 92, direction: zombie.approachesFromLeft ? -1 : 1)
@@ -799,9 +796,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 // A walking zombie's body is kinematic (isDynamic == false, see ZombieNode.init),
                 // so without this a weapon that doesn't kill would just bounce off it and the
                 // zombie would keep walking as if nothing happened. Launching it off the weapon's
-                // own velocity instead sells the hit and can chain into further collisions.
-                if zombie.canBeKnockedBack, let weaponBody = bodies.first(where: { $0.categoryBitMask == PhysicsCategory.weapon }) {
-                    knockback(zombie, impulse: CGVector(dx: weaponBody.velocity.dx * 0.32, dy: abs(weaponBody.velocity.dy) * 0.24 + 90))
+                // own velocity instead sells the hit and can chain into further collisions. Signed
+                // (not abs'd) dy so a weapon striking downward reads as a weaker pop than one
+                // striking upward, instead of both looking identical.
+                if zombie.canBeKnockedBack {
+                    knockback(zombie, impulse: CGVector(dx: weaponBody.velocity.dx * 0.32, dy: weaponBody.velocity.dy * 0.22 + 90))
                 }
             }
             return
@@ -841,9 +840,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// flick uses (see ZombieNode.launch), clamped to a readable stagger-hop rather than a full
     /// screen-length flight. `impulse` is a direct directional push (e.g. off a weapon's own
     /// velocity); the `awayFrom:` overload derives direction from another body's position.
+    /// Divides by the zombie's own `throwResistance` here rather than inside `launch()` itself —
+    /// `launch()` also backs explodeVolatile/fireScatterblast/throwExplosive, whose impulse
+    /// constants are already tuned per-weapon assuming it applies them undivided, so scaling
+    /// there would have quietly weakened every one of those against riot/butcher/colossus.
     private func knockback(_ zombie: ZombieNode, impulse: CGVector) {
-        let dx = max(-360, min(360, impulse.dx))
-        let dy = max(90, min(320, impulse.dy))
+        let dx = max(-360, min(360, impulse.dx)) / zombie.kind.throwResistance
+        let dy = max(90, min(320, impulse.dy)) / zombie.kind.throwResistance
         zombie.launch(with: CGVector(dx: dx, dy: dy))
     }
 

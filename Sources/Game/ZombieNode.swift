@@ -92,19 +92,24 @@ enum ZombieKind: String, CaseIterable, Codable {
         }
     }
 
+    // Bumped ~7-8% (brute/boss ~7%) alongside the restitution increase in ZombieNode.init —
+    // SpriteKit's collisionImpulse for a ground contact scales with (1+restitution), so raising
+    // restitution alone would have quietly made every fall more lethal at the same fall height.
+    // This is an estimate matching that scaling factor, not a measured value; revisit after a
+    // playtest pass.
     var defeatImpulse: CGFloat {
         switch self {
-        case .walker: 22
-        case .runner: 18
-        case .brute: 48
-        case .crawler: 25
-        case .armored: 42
-        case .volatile: 30
-        case .waitress: 20
-        case .riot: 48
-        case .groundskeeper: 34
-        case .butcher: 75
-        case .colossus: 92
+        case .walker: 24
+        case .runner: 19
+        case .brute: 51
+        case .crawler: 27
+        case .armored: 45
+        case .volatile: 32
+        case .waitress: 22
+        case .riot: 52
+        case .groundskeeper: 37
+        case .butcher: 80
+        case .colossus: 98
         }
     }
 
@@ -259,8 +264,13 @@ final class ZombieNode: SKNode {
     var canBeGrabbed: Bool { !kind.isBoss || bossIsStunned }
     /// Only a plainly-walking zombie can be sent into a knockback launch — mid-air, grabbed,
     /// frozen, attacking, or already-recovering zombies own their own physics/state transitions
-    /// and a launch() here would fight them.
-    var canBeKnockedBack: Bool { state == .walking }
+    /// and a launch() here would fight them. Bosses are excluded from casual knockback the same
+    /// way canBeGrabbed excludes them from casual grabs — a stray weapon graze or pileup bump
+    /// shouldn't fling a butcher/colossus around. Also excluded below a low health floor: a
+    /// non-lethal hit here already used up this zombie's `firstHitHealthFloor` protection (see
+    /// that property), so launching a near-dead zombie into a fall could kill it on landing —
+    /// bundling two hits' worth of damage into what reads to the player as one action.
+    var canBeKnockedBack: Bool { state == .walking && (!kind.isBoss || bossIsStunned) && healthFraction > 0.2 }
 
     var hasCompleteAnimationRig: Bool {
         sprites.count == RigPart.allCases.count && sprites.values.allSatisfy {
@@ -564,15 +574,30 @@ final class ZombieNode: SKNode {
         return applyDamage(amount * (local.y > kind.size.height * 0.23 ? 1.75 : 1), canOverkill: canOverkill, preferredPart: preferredPart)
     }
 
-    func release(with velocity: CGVector, powerMultiplier: CGFloat) {
-        guard !isDefeated else { return }
+    /// Shared "become airborne" transition for release() (a player flick) and launch() (an
+    /// impulse from an explosion, weapon knockback, or zombie collision). If the zombie is
+    /// already mid-flight, this preserves the in-progress highestPoint/hasResolvedImpact
+    /// tracking instead of resetting it to the current (possibly lower, mid-fall) position —
+    /// re-launching a still-airborne zombie used to silently understate its eventual fall
+    /// damage by discarding how high it had actually gotten.
+    private func beginAirborne() {
+        let alreadyAirborne = isThrown && state == .airborne
         isGrabbed = false
         isThrown = true
         state = .airborne
-        hasResolvedImpact = false
-        highestPoint = position.y
+        if alreadyAirborne {
+            highestPoint = max(highestPoint, position.y)
+        } else {
+            hasResolvedImpact = false
+            highestPoint = position.y
+        }
         physicsBody?.isDynamic = true
         physicsBody?.affectedByGravity = true
+    }
+
+    func release(with velocity: CGVector, powerMultiplier: CGFloat) {
+        guard !isDefeated else { return }
+        beginAirborne()
         physicsBody?.velocity = CGVector(dx: velocity.dx * powerMultiplier / kind.throwResistance, dy: velocity.dy * powerMultiplier / kind.throwResistance)
         // Widened from ±8 and given a random jitter on top of the dx-derived spin so throws
         // tumble more and don't all rotate at an identical, predictable rate.
@@ -581,21 +606,23 @@ final class ZombieNode: SKNode {
     }
 
     func launch(with impulse: CGVector) {
-        guard !isDefeated else { return }
-        isGrabbed = false
-        isThrown = true
-        state = .airborne
-        hasResolvedImpact = false
-        highestPoint = position.y
-        physicsBody?.isDynamic = true
-        physicsBody?.affectedByGravity = true
-        // Same throwResistance damping release() applies to a player flick, so a bowling ball or
-        // explosion sends a riot/butcher/colossus flying noticeably less far than a regular
-        // zombie — and a spin kick, since applyImpulse alone (no offset point) imparts no torque
-        // and used to leave explosion/collision knockbacks flying dead straight with no tumble.
-        let scaled = CGVector(dx: impulse.dx / kind.throwResistance, dy: impulse.dy / kind.throwResistance)
-        physicsBody?.applyImpulse(scaled)
-        physicsBody?.angularVelocity = max(-10, min(10, -scaled.dx / 55 + CGFloat.random(in: -2.2...2.2)))
+        // A currently-grabbed zombie is under direct player control (see beginGrab and
+        // GameScene's touchesMoved/releaseZombie, which keep driving its position/state every
+        // frame the finger is down) — an explosion or weapon knockback launching it out from
+        // under the player's finger would fight that touch handling, so it's excluded here
+        // rather than relying on every caller to remember to check first.
+        guard !isDefeated, !isGrabbed else { return }
+        beginAirborne()
+        // Magnitude is intentionally NOT divided by kind.throwResistance here, unlike release():
+        // explodeVolatile/fireScatterblast/throwExplosive already tune their radialImpulse
+        // constants per-weapon assuming this applies them as-is, and dividing again here would
+        // quietly weaken every one of those against riot/butcher/colossus. GameScene.knockback
+        // applies its own throwResistance scaling before calling this, for the caller that wants
+        // per-kind resistance without touching the pre-tuned explosion/scatter constants.
+        physicsBody?.applyImpulse(impulse)
+        // Spin kick — applyImpulse alone (no offset point) imparts no torque, which used to leave
+        // explosion/collision knockbacks flying dead straight with no tumble.
+        physicsBody?.angularVelocity = max(-10, min(10, -impulse.dx / 55 + CGFloat.random(in: -2.2...2.2)))
     }
 
     func playImpact(reducedMotion: Bool) {
