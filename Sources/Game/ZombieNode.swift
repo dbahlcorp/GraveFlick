@@ -252,6 +252,11 @@ final class ZombieNode: SKNode {
     /// the same. Cleared on a safe landing so a later, unrelated kill (weapon/trap/collision)
     /// doesn't inherit a stale reading from an old throw.
     private(set) var lastImpactPower: CGFloat = 0
+    /// True only when the current/most recent flight is a direct player flick (release()), false
+    /// for an explosion/knockback launch() — GameScene reads this to tell the two apart for
+    /// feat-tracking (e.g. "no *grabbed* zombie touches the ground this wave" shouldn't count a
+    /// zombie a bowling ball happened to knock into the pavement).
+    private(set) var wasPlayerThrown = false
     private(set) var health: CGFloat
     private let maximumHealth: CGFloat
     private let movementMultiplier: CGFloat
@@ -685,6 +690,7 @@ final class ZombieNode: SKNode {
     func release(with velocity: CGVector, powerMultiplier: CGFloat) {
         guard !isDefeated else { return }
         beginAirborne()
+        wasPlayerThrown = true
         let launchVelocity = CGVector(dx: velocity.dx * powerMultiplier / kind.throwResistance, dy: velocity.dy * powerMultiplier / kind.throwResistance)
         physicsBody?.velocity = launchVelocity
         // Normalized against the flick speed cap (GameRules.maximumFlickSpeed) using the actual
@@ -705,6 +711,7 @@ final class ZombieNode: SKNode {
         // rather than relying on every caller to remember to check first.
         guard !isDefeated, !isGrabbed else { return }
         beginAirborne()
+        wasPlayerThrown = false
         // Magnitude is intentionally NOT divided by kind.throwResistance here, unlike release():
         // explodeVolatile/fireScatterblast/throwExplosive already tune their radialImpulse
         // constants per-weapon assuming this applies them as-is, and dividing again here would
@@ -770,6 +777,7 @@ final class ZombieNode: SKNode {
         // throw of its own) doesn't inherit this throw's impact-feedback power (see
         // lastImpactPower).
         lastImpactPower = 0
+        wasPlayerThrown = false
         // Unconditional, not max(position.y, ...): physics is disabled right after this and never
         // touches position.y again until the next throw, so if the impact bounce left the zombie
         // still elevated when this fires, max() would let it walk stuck at that height forever.

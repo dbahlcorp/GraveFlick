@@ -316,13 +316,18 @@ private struct CreditsView: View {
         ,("survival_20", "Long Night", "Reach survival wave 20")
         ,("combo_20", "Floor Is Lava", "Reach a twenty-hit combo")
         ,("century", "Closing Crew", "Defeat 100 enemies in one shift")
+        ,("bowling_triple", "Strike", "Kill 3 zombies with one bowling ball roll")
+        ,("graceful_wave", "Not a Scratch", "Clear a whole wave without a grabbed zombie touching the ground")
+        ,("boss_friendly_fire", "Not Very Friendly", "Kill a boss by colliding it with another zombie")
+        ,("sky_launch", "Reach for the Stars", "Launch a zombie clean over the top of the screen")
+        ,("chain_reaction_10", "Ten-Pin Special", "Chain a single explosion into 10 kills")
     ]
 
     var body: some View {
         NightBackground {
             VStack(spacing: 16) {
                 ScreenHeader(title: "CREDITS & ACHIEVEMENTS", subtitle: "An original midnight survival comedy") { model.screen = .menu }
-                // The achievements column (9 fixed-height rows) can outgrow a landscape phone's
+                // The achievements column (14 fixed-height rows) can outgrow a landscape phone's
                 // vertical space on its own — scroll the whole content area rather than clip it.
                 // No ScrollViewReader/onAppear(scrollTo:) — see UpgradeShopView for why that
                 // pattern fights the user's own scrolling instead of just setting the initial spot.

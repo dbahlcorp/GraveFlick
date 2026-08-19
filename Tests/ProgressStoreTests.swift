@@ -33,6 +33,25 @@ final class ProgressStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.progress, store.progress)
     }
 
+    /// Skill-based feats (GameScene.achievedFeats — "kill 3 with one bowling ball," etc.) are just
+    /// more achievement IDs by the time they reach ProgressStore: same grant loop, same +100 coins,
+    /// same one-time-only guard as the existing score/completion achievements.
+    func testLevelFeatsGrantAchievementsAndCoinsOnce() {
+        let store = ProgressStore(defaults: defaults)
+        let startingCurrency = store.progress.currency
+        let result = LevelResult(levelID: 1, score: 500, stars: 1, reward: 180, won: true, defeats: 8, maxCombo: 3, wave: 3, feats: ["bowling_triple", "sky_launch"])
+
+        store.complete(result)
+        XCTAssertTrue(store.progress.achievements.contains("bowling_triple"))
+        XCTAssertTrue(store.progress.achievements.contains("sky_launch"))
+        // +180 reward, +100 "first_shift" (won == true), +100 each for the two feats = +480.
+        XCTAssertEqual(store.progress.currency, startingCurrency + 480)
+
+        // A second run reporting the same feats shouldn't pay out again.
+        store.complete(LevelResult(levelID: 1, score: 500, stars: 1, reward: 180, won: true, defeats: 8, maxCombo: 3, wave: 3, feats: ["bowling_triple"]))
+        XCTAssertEqual(store.progress.currency, startingCurrency + 480 + 180)
+    }
+
     func testUpgradePurchaseChargesCoinsAndCapsAtThree() {
         let store = ProgressStore(defaults: defaults)
         XCTAssertTrue(store.buyUpgrade(.flickTraining))

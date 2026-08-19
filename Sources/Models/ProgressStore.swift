@@ -47,6 +47,9 @@ final class ProgressStore: ObservableObject {
         if result.wave >= 20 { newAchievements.append("survival_20") }
         if result.maxCombo >= 20 { newAchievements.append("combo_20") }
         if result.defeats >= 100 { newAchievements.append("century") }
+        // Skill-based feats (see GameScene.achievedFeats) are just more achievement IDs by the
+        // time they get here — same grant loop, same +100 coins, same persistence.
+        newAchievements.append(contentsOf: result.feats)
         for achievement in newAchievements where !progress.achievements.contains(achievement) {
             progress.achievements.insert(achievement)
             progress.currency += 100

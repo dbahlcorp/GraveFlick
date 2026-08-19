@@ -103,6 +103,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var activeModifier: WaveModifier?
     private var modifierOverlayNode: SKNode?
     private var rolledModifierWaves: Set<Int> = []
+    /// Skill-based feats performed this run ("how you played," not score/completion thresholds —
+    /// see LevelResult.feats), folded into `finish(won:)`'s result and granted as ordinary
+    /// achievements by ProgressStore.complete. Accumulates for the whole run; never cleared mid-run.
+    private var achievedFeats: Set<String> = []
+    /// Tracks the GRACEFUL_WAVE feat ("clear a wave without a grabbed zombie touching the
+    /// ground") across whichever wave-transition path is active (endless's `wave = newWave` or
+    /// campaign's updateCampaignWave) — checked centrally in `update()` on any change to `wave`
+    /// rather than duplicated in both branches. 0 is a sentinel for "not yet synced," so the very
+    /// first frame doesn't look like a completed wave.
+    private var lastObservedWaveForFeats = 0
+    private var playerThrewThisWave = false
+    private var playerThrownZombieGroundedThisWave = false
     /// Global walk-speed tuning knob, layered under every other speed multiplier (difficulty,
     /// wave ramp, sandbox slider) so it scales zombies uniformly without touching their relative
     /// per-kind balance.
@@ -242,6 +254,17 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             updateCampaignWave(deltaTime: deltaTime)
         }
 
+        // GRACEFUL_WAVE: works the same way regardless of which branch above actually moved
+        // `wave` forward, so it doesn't need its own copy in both the endless and campaign paths.
+        if wave != lastObservedWaveForFeats {
+            if lastObservedWaveForFeats > 0, playerThrewThisWave, !playerThrownZombieGroundedThisWave {
+                achievedFeats.insert("graceful_wave")
+            }
+            lastObservedWaveForFeats = wave
+            playerThrewThisWave = false
+            playerThrownZombieGroundedThisWave = false
+        }
+
         let zombies = activeZombies
         let nearestThreat = zombies
             .filter { !$0.isDefeated && !$0.isGrabbed && !$0.isThrown }
@@ -251,6 +274,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             zombie.updateWalking(deltaTime: deltaTime, reducedMotion: settings.reducedMotion)
             if zombie.isDefeated { continue }
             if level.isEndless { applyVisibilityModifier(to: zombie) }
+            // SKY_LAUNCH: checked every frame while airborne (not just on landing/defeat) so it's
+            // caught regardless of what happens next — surviving the fall, landing, or exiting off
+            // a side boundary without ever triggering a ground contact.
+            if zombie.highestPoint > size.height { achievedFeats.insert("sky_launch") }
             if !zombie.isGrabbed, !zombie.isThrown, zombieHasReachedHouse(zombie) {
                 zombieReachedHouse(zombie)
             } else if zombie.position.y < -170 || zombie.position.x < -220 || zombie.position.x > size.width + 220 {
@@ -961,6 +988,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         if let zombie = zombieBody(in: bodies), bodies.contains(where: { $0.categoryBitMask == PhysicsCategory.ground }), zombie.isThrown, !zombie.hasResolvedImpact {
             zombie.hasResolvedImpact = true
+            // GRACEFUL_WAVE only cares about zombies the player actually grabbed and flicked, not
+            // ones an explosion or another zombie knocked to the ground (see ZombieNode.wasPlayerThrown).
+            if zombie.wasPlayerThrown { playerThrownZombieGroundedThisWave = true }
             let fallHeight = max(0, zombie.highestPoint - zombie.position.y)
             let heightDamage = min(2.2, fallHeight / 190)
             let impactDamage = contact.collisionImpulse / max(1, zombie.kind.defeatImpulse)
@@ -982,6 +1012,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 // Tracked on the projectile itself (see incrementKillTally) so a bowling ball that
                 // rolls through several zombies knows this is its 2nd+ kill — that's ZOMBIE BOWLING.
                 let tally = incrementKillTally(on: weaponBody.node)
+                if weaponKind == .bowlingBall, tally >= 3 { achievedFeats.insert("bowling_triple") }
                 defeat(zombie, reason: .weapon, multiKillTally: tally, weaponKind: weaponKind)
             } else {
                 SoundManager.shared.playZombieVoice(for: zombie.kind, moment: .hurt, pan: audioPan(for: zombie))
@@ -1031,6 +1062,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                     shakeCamera(intensity: 0.4)
                 }
                 if zombie.damage(contact.collisionImpulse / 42) {
+                    if zombie.kind.isBoss { achievedFeats.insert("boss_friendly_fire") }
                     defeat(zombie, reason: .collision)
                 } else if zombie.canBeKnockedBack, let otherZombie {
                     knockback(zombie, awayFrom: otherZombie.position, magnitude: contact.collisionImpulse)
@@ -1134,6 +1166,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         var velocity = FlickMath.velocity(from: samples)
         if hypot(velocity.dx, velocity.dy) < 140 { velocity.dy = 180 }
         zombie.release(with: velocity, powerMultiplier: flickMultiplier)
+        playerThrewThisWave = true
         // A confirming hit-stop "snap" right at the moment of a hard flick, scaled continuously
         // with zombie.lastImpactPower instead of the old fixed 1,850pt/s on-or-off cutoff — the
         // (usually bigger) landing-moment payoff happens separately in resolveImpact/defeat.
@@ -1469,6 +1502,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 zombie.launch(with: radialImpulse(from: point, to: zombie.position, radius: radius, maxImpulse: 380, minImpulse: 140))
             }
         }
+        if killTally >= 10 { achievedFeats.insert("chain_reaction_10") }
         playCombatVFX(.explosion, at: point, size: 270, direction: 1)
         SoundManager.shared.play(.explosion)
         SoundManager.shared.duckMusic(strength: 0.48, duration: 0.42)
@@ -1733,6 +1767,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 zombie.launch(with: radialImpulse(from: point, to: zombie.position, radius: radius, maxImpulse: maxImpulse, minImpulse: minImpulse))
             }
         }
+        if killTally >= 10 { achievedFeats.insert("chain_reaction_10") }
         playCombatVFX(.explosion, at: point, size: radius * 1.7, direction: 1)
         SoundManager.shared.play(.explosion)
         SoundManager.shared.duckMusic(strength: 0.48, duration: 0.42)
@@ -2202,7 +2237,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // campaign/sandbox runs never populate activePerks, so nightShiftBonusMultiplier is always
         // exactly 1 there and this is a no-op.
         let reward = level.isSandbox ? 0 : Int(Double(baseReward) * settings.difficulty.rewardMultiplier * Double(nightShiftBonusMultiplier))
-        let result = LevelResult(levelID: level.id, score: score, stars: earnedStars, reward: reward, won: won, defeats: defeats, maxCombo: maxCombo, wave: wave)
+        // Sandbox has unlimited health/spawns, so every feat here is trivially farmable (stack ten
+        // volatiles and pop them for a free CHAIN_REACTION_10) — same reasoning as reward above.
+        let result = LevelResult(levelID: level.id, score: score, stars: earnedStars, reward: reward, won: won, defeats: defeats, maxCombo: maxCombo, wave: wave, feats: level.isSandbox ? [] : achievedFeats)
         gameDelegate?.gameScene(self, didFinish: result)
     }
 

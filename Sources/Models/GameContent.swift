@@ -379,4 +379,8 @@ struct LevelResult {
     let defeats: Int
     let maxCombo: Int
     let wave: Int
+    /// Skill-based feats performed this run (see GameScene.achievedFeats) — "how you played," not
+    /// score/completion thresholds. Achievement IDs, folded directly into ProgressStore.complete's
+    /// existing achievement-granting loop rather than a parallel system.
+    var feats: Set<String> = []
 }
