@@ -55,6 +55,9 @@ final class GameSessionModel: ObservableObject, GameSceneDelegate, Identifiable 
     @Published private(set) var isPaused = false
     @Published private(set) var result: LevelResult?
     @Published var showsTutorial: Bool
+    /// Non-empty only while an endless-mode perk offer (see GameScene.offerPerkChoices) is
+    /// awaiting the player's pick — GameContainerView shows the picker whenever this isn't empty.
+    @Published private(set) var perkChoices: [Perk] = []
 
     let level: GameLevel
     let progress: PlayerProgress
@@ -85,6 +88,7 @@ final class GameSessionModel: ObservableObject, GameSceneDelegate, Identifiable 
         weaponCooldowns = snapshot.weaponCooldowns
         trapCooldowns = snapshot.trapCooldowns
         armedWeapon = snapshot.armedWeapon
+        perkChoices = snapshot.perkChoices
     }
 
     func gameScene(_ scene: GameScene, didFinish result: LevelResult) {
@@ -95,7 +99,7 @@ final class GameSessionModel: ObservableObject, GameSceneDelegate, Identifiable 
     }
 
     func togglePause() {
-        guard result == nil, !showsTutorial else { return }
+        guard result == nil, !showsTutorial, perkChoices.isEmpty else { return }
         isPaused.toggle()
         scene.isGameplayPaused = isPaused
     }
@@ -115,6 +119,7 @@ final class GameSessionModel: ObservableObject, GameSceneDelegate, Identifiable 
     func arm(_ weapon: WeaponKind) { scene.armWeapon(weapon) }
     func use(_ trap: TrapKind) { scene.useTrap(trap) }
     func useSpecial() { scene.useSpecial() }
+    func choosePerk(_ perk: Perk) { scene.choosePerk(perk) }
 }
 
 struct GameRootView: View {
@@ -691,6 +696,7 @@ private struct GameContainerView: View {
             if session.isPaused {
                 if showsSettings { settingsModal } else { pauseModal }
             }
+            if !session.perkChoices.isEmpty { perkChoiceModal }
             if let result = session.result { resultModal(result) }
         }
         .background(Color.black)
@@ -952,6 +958,41 @@ private struct GameContainerView: View {
             Text(detail).font(.caption).foregroundStyle(.white.opacity(0.62)).multilineTextAlignment(.center)
         }
         .frame(maxWidth: 150)
+    }
+
+    private var perkChoiceModal: some View {
+        ModalCard {
+            Text("NIGHT SHIFT PERK").font(.title.weight(.black))
+            Text("Wave \(session.wave) — pick one. It lasts the rest of this run.")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.white.opacity(0.68))
+                .multilineTextAlignment(.center)
+            VStack(spacing: 12) {
+                ForEach(session.perkChoices) { perk in
+                    Button {
+                        session.choosePerk(perk)
+                    } label: {
+                        HStack(spacing: 14) {
+                            Image(systemName: perk.icon)
+                                .font(.title2.weight(.bold))
+                                .foregroundStyle(.orange)
+                                .frame(width: 34)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(perk.title).font(.headline.weight(.black))
+                                Text(perk.subtitle)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.white.opacity(0.72))
+                                    .multilineTextAlignment(.leading)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .frame(width: 380, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .roadsidePanel(padding: 14)
+                }
+            }
+        }
     }
 
     private var pauseModal: some View {

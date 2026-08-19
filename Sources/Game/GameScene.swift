@@ -21,6 +21,9 @@ struct GameHUDSnapshot {
     let weaponCooldowns: [WeaponKind: TimeInterval]
     let trapCooldowns: [TrapKind: TimeInterval]
     let armedWeapon: WeaponKind?
+    /// Non-empty only while a perk offer is awaiting the player's pick (see
+    /// GameScene.offerPerkChoices/choosePerk) — SwiftUI shows the picker whenever this isn't empty.
+    let perkChoices: [Perk]
 }
 
 @MainActor
@@ -88,6 +91,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var spawningFinished = false
     private var didBuildWorld = false
     private var spawnedBossWaves: Set<Int> = []
+    /// Roguelite perk state — endless-only, in-memory for this run only (never touches
+    /// ProgressStore/PlayerProgress, which is permanent cross-run progression). Keyed by perk
+    /// rather than a flat list so picking the same perk again on a later offer stacks its effect
+    /// instead of being a no-op; every mechanical hook reads its count via `perkStacks(_:)`.
+    private var activePerks: [Perk: Int] = [:]
+    private var pendingPerkChoices: [Perk] = []
+    private var offeredPerkWaves: Set<Int> = []
     /// Global walk-speed tuning knob, layered under every other speed multiplier (difficulty,
     /// wave ramp, sandbox slider) so it scales zombies uniformly without touching their relative
     /// per-kind balance.
@@ -109,7 +119,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // 9_999, not 99: with the numeric health pool a fully upgraded diner's real max (up to 160)
     // could otherwise exceed sandbox's old "effectively unlimited" value.
     private var startingHealth: Int { level.isSandbox ? 9_999 : (level.modifier == .suddenDeath ? 1 : GameRules.startingHealth + progress.upgradeLevel(.reinforcedDiner) * GameRules.reinforcedDinerHealthPerLevel) }
-    private var flickMultiplier: CGFloat { 1 + CGFloat(progress.upgradeLevel(.flickTraining)) * 0.10 }
+    private var flickMultiplier: CGFloat { (1 + CGFloat(progress.upgradeLevel(.flickTraining)) * 0.10) * flickVelocityBonus }
     private var rapidGearLevel: Int { progress.upgradeLevel(.rapidGear) }
     private var groundY: CGFloat { max(70, size.height * 0.13) }
     private var houseFrame: CGRect {
@@ -180,6 +190,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 SoundManager.shared.updateGameplayMix(wave: wave, healthFraction: CGFloat(health) / CGFloat(max(1, startingHealth)))
                 let incomingBoss = GameRules.bossKind(forWave: wave)
                 announce(text: incomingBoss.map { "\($0.displayName) INCOMING" } ?? "WAVE \(wave)", color: .white)
+                // Same cadence as the boss wave check just above — every 5th wave doubles as both
+                // a boss intro and a "level up before the fight" perk pick.
+                if wave > 1, wave.isMultiple(of: 5), !offeredPerkWaves.contains(wave) {
+                    offeredPerkWaves.insert(wave)
+                    offerPerkChoices()
+                }
             }
             waveStatus = "SURVIVE"
             waveStatusHighlighted = false
@@ -750,8 +766,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         SoundManager.shared.play(.special)
         SoundManager.shared.duckMusic(strength: 0.34, duration: 0.55)
         announce(text: "GRAVE TIME", color: .cyan)
+        let slowDuration = 8 + graveTimeBonusDuration
         for zombie in activeZombies {
-            zombie.slow(for: 8, reducedMotion: settings.reducedMotion)
+            zombie.slow(for: slowDuration, reducedMotion: settings.reducedMotion)
             zombie.physicsBody?.velocity.dx *= 0.35
             zombie.physicsBody?.velocity.dy *= 0.35
         }
@@ -764,6 +781,44 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             world.addChild(wash)
             wash.run(.sequence([.fadeOut(withDuration: 0.8), .removeFromParent()]))
         }
+        notifyDelegate()
+    }
+
+    /// How many times the player has chosen `perk` so far this run. Every perk's mechanical hook
+    /// reads this rather than a plain `Bool`, so picking the same "ridiculous" perk again on a
+    /// later offer compounds it instead of doing nothing.
+    private func perkStacks(_ perk: Perk) -> Int { activePerks[perk] ?? 0 }
+
+    private var flickVelocityBonus: CGFloat { 1 + CGFloat(perkStacks(.flickVelocity)) * 0.20 }
+    private var volatileBlastRadiusBonus: CGFloat { 1 + CGFloat(perkStacks(.volatileBlastRadius)) * 0.35 }
+    private var explosiveWeaponRadiusBonus: CGFloat { 1 + CGFloat(perkStacks(.explosiveWeaponRadius)) * 0.30 }
+    private var graveTimeBonusDuration: TimeInterval { TimeInterval(perkStacks(.graveTimeExtended)) * 2 }
+    private var chargeRushBonus: CGFloat { 1 + CGFloat(perkStacks(.chargeRush)) * 0.25 }
+    private var nightShiftBonusMultiplier: CGFloat { 1 + CGFloat(perkStacks(.nightShiftBonus)) * 0.20 }
+    /// Floored at 0.1 (never below 10% of normal damage) rather than letting enough stacks zero it
+    /// out entirely — a maxed-out build should feel nearly invincible against bites, not literally
+    /// immune; `resolveDinerAttack` also floors the final Int damage at 1 for the same reason.
+    private var fortifiedDinerReduction: CGFloat { max(0.1, 1 - CGFloat(perkStacks(.fortifiedDiner)) * 0.15) }
+    private var comboWindowBonus: TimeInterval { TimeInterval(perkStacks(.longerFuse)) * 0.4 }
+    private var hasBowlingRicochet: Bool { perkStacks(.bowlingRicochet) > 0 }
+    private var hasShockwaveSlams: Bool { perkStacks(.shockwaveSlams) > 0 }
+
+    /// Every 5th endless wave (see the wave-transition check in `update(_:)`), freeze gameplay and
+    /// hand the player three random perks — reusing `isGameplayPaused` rather than any new pause
+    /// mechanism, since it already stops physics/actions and cancels any in-progress weapon drag.
+    private func offerPerkChoices() {
+        pendingPerkChoices = Array(Perk.allCases.shuffled().prefix(3))
+        isGameplayPaused = true
+        notifyDelegate()
+    }
+
+    /// Called by the SwiftUI perk picker (via GameSessionModel.choosePerk) when the player taps
+    /// one of the three offered cards.
+    func choosePerk(_ perk: Perk) {
+        guard pendingPerkChoices.contains(perk) else { return }
+        activePerks[perk, default: 0] += 1
+        pendingPerkChoices = []
+        isGameplayPaused = false
         notifyDelegate()
     }
 
@@ -891,6 +946,18 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // A second, landing-moment hit-stop — separate from releaseZombie's release-moment
             // "snap" — so a hard slam gets weight both at the throw and at the payoff.
             hitStop(duration: min(0.14, 0.05 + Double(power) * 0.09), slowFactor: max(0.12, 0.4 - power * 0.22))
+            // GROUND ZERO: reuses the same knockback() a weapon/collision hit already sends a
+            // walking zombie flying with (see didBegin) — a hard-enough slam radiates the same
+            // effect outward to everyone standing nearby.
+            if hasShockwaveSlams {
+                let shockRadius: CGFloat = 140
+                for other in activeZombies where other.canBeKnockedBack
+                    && hypot(other.position.x - impactPoint.x, other.position.y - impactPoint.y) < shockRadius {
+                    knockback(other, awayFrom: impactPoint, magnitude: 55 + power * 55)
+                }
+                shakeCamera(intensity: 0.35)
+                playCombatVFX(.pavementImpact, at: impactPoint, size: shockRadius * 1.3, direction: 1)
+            }
         }
         if zombie.damage(damage, canOverkill: zombie.isFrozenSolid) {
             defeat(zombie, reason: .impact)
@@ -1096,7 +1163,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     private func resolveDinerAttack(from zombie: ZombieNode) {
         SoundManager.shared.playZombieVoice(for: zombie.kind, moment: .attack, pan: audioPan(for: zombie))
-        health = level.isSandbox ? health : max(0, health - zombie.kind.dinerDamage)
+        // STORM SHUTTERS floors at 1 damage regardless of stacking (see fortifiedDinerReduction)
+        // so the diner is never literally unkillable, just much tankier.
+        let bite = level.isSandbox ? 0 : max(1, Int((CGFloat(zombie.kind.dinerDamage) * fortifiedDinerReduction).rounded()))
+        health = level.isSandbox ? health : max(0, health - bite)
         combo = 0
         dinerNode?.takeHit(remainingHealth: health, maximumHealth: startingHealth)
         damageScenery(near: zombie.position)
@@ -1126,7 +1196,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func defeat(_ zombie: ZombieNode, reason: DefeatReason, multiKillTally: Int = 1, weaponKind: WeaponKind? = nil) {
         guard zombie.parent != nil, !zombie.isDefeated else { return }
         let gapSincePreviousKill = elapsedTime - lastDefeatTime
-        if gapSincePreviousKill <= 1.8 { combo += 1 } else { combo = 1 }
+        if gapSincePreviousKill <= 1.8 + comboWindowBonus { combo += 1 } else { combo = 1 }
         maxCombo = max(maxCombo, combo)
         defeats += 1
         if level.isSandbox { sandboxDefeats += 1 }
@@ -1144,7 +1214,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         )
         let killScore = GameRules.score(for: zombie.kind, combo: combo, event: event)
         score += killScore
-        specialCharge = min(1, specialCharge + (zombie.kind.isBoss ? 0.5 : (zombie.kind == .brute ? 0.22 : 0.12)))
+        let chargeGain = (zombie.kind.isBoss ? 0.5 : (zombie.kind == .brute ? 0.22 : 0.12)) * Double(chargeRushBonus)
+        specialCharge = min(1, specialCharge + chargeGain)
         let point = zombie.position
         let volatile = zombie.kind == .volatile
         if settings.goreEnabled {
@@ -1234,7 +1305,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func explodeVolatile(at point: CGPoint) {
-        let radius: CGFloat = 170
+        let radius: CGFloat = 170 * volatileBlastRadiusBonus
         let nearby = activeZombies.filter {
             !$0.isDefeated && hypot($0.position.x - point.x, $0.position.y - point.y) < radius
         }
@@ -1270,17 +1341,20 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // than intended, hitting more of each body than the original size ratio called for.
         ball.physicsBody = SKPhysicsBody(circleOfRadius: 12)
         ball.physicsBody?.mass = 3.5
-        ball.physicsBody?.restitution = 0.32
+        // GUTTER? NEVER HEARD OF HER: bouncing off the boundary (instead of just rolling past it
+        // and despawning) turns one throw into several passes through the crowd, so it also gets a
+        // livelier bounce and a longer lifetime to actually use it.
+        ball.physicsBody?.restitution = hasBowlingRicochet ? 0.62 : 0.32
         ball.physicsBody?.friction = 0.7
         ball.physicsBody?.categoryBitMask = PhysicsCategory.weapon
-        ball.physicsBody?.collisionBitMask = PhysicsCategory.zombie | PhysicsCategory.ground
+        ball.physicsBody?.collisionBitMask = PhysicsCategory.zombie | PhysicsCategory.ground | (hasBowlingRicochet ? PhysicsCategory.boundary : PhysicsCategory.none)
         ball.physicsBody?.contactTestBitMask = PhysicsCategory.zombie
         ball.physicsBody?.velocity = velocity
         SoundManager.shared.play(.bowlingRoll)
         if !settings.reducedMotion {
             ball.run(.repeatForever(.rotate(byAngle: velocity.dx < 0 ? .pi * 2 : -.pi * 2, duration: 0.38)), withKey: "roll")
         }
-        ball.run(.sequence([.wait(forDuration: 5), .removeFromParent()]))
+        ball.run(.sequence([.wait(forDuration: hasBowlingRicochet ? 9 : 5), .removeFromParent()]))
     }
 
     /// Half-angle of the scatterblast cone, in radians (~22°).
@@ -1497,7 +1571,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         return CGVector(dx: cos(angle) * magnitude, dy: sin(angle) * magnitude)
     }
 
-    private func throwExplosive(at point: CGPoint, radius: CGFloat, damage: CGFloat, maxImpulse: CGFloat = 460, minImpulse: CGFloat = 140) {
+    private func throwExplosive(at point: CGPoint, radius rawRadius: CGFloat, damage: CGFloat, maxImpulse: CGFloat = 460, minImpulse: CGFloat = 140) {
+        let radius = rawRadius * explosiveWeaponRadiusBonus
         var killTally = 0
         for zombie in activeZombies where !zombie.isDefeated && hypot(zombie.position.x - point.x, zombie.position.y - point.y) < radius {
             if zombie.damage(damage * zombie.kind.weaponDamageMultiplier, canOverkill: true) {
@@ -1972,7 +2047,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // performance instead of the win-gated per-level reward, and stars don't apply.
         let earnedStars = level.isEndless ? 0 : GameRules.stars(score: score, health: health, startingHealth: startingHealth, won: won)
         let baseReward = level.isEndless ? GameRules.survivalReward(score: score) : (won ? level.reward + earnedStars * 40 : 0)
-        let reward = level.isSandbox ? 0 : Int(Double(baseReward) * settings.difficulty.rewardMultiplier)
+        // TIPS ARE POOLED only applies to endless (it's a perk from that mode's own perk pool) —
+        // campaign/sandbox runs never populate activePerks, so nightShiftBonusMultiplier is always
+        // exactly 1 there and this is a no-op.
+        let reward = level.isSandbox ? 0 : Int(Double(baseReward) * settings.difficulty.rewardMultiplier * Double(nightShiftBonusMultiplier))
         let result = LevelResult(levelID: level.id, score: score, stars: earnedStars, reward: reward, won: won, defeats: defeats, maxCombo: maxCombo, wave: wave)
         gameDelegate?.gameScene(self, didFinish: result)
     }
@@ -2001,7 +2079,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             while let current = candidate {
                 if let name = current.name, name.hasPrefix("pickup-"), let weapon = WeaponKind(rawValue: String(name.dropFirst(7))) {
                     weaponCooldowns[weapon] = 0
-                    specialCharge = min(1, specialCharge + 0.20)
+                    specialCharge = min(1, specialCharge + 0.20 * Double(chargeRushBonus))
                     current.removeFromParent()
                     SoundManager.shared.play(.pickup)
                     announce(text: "\(weapon.title.uppercased()) READY", color: .yellow)
@@ -2039,7 +2117,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             specialCharge: specialCharge,
             weaponCooldowns: weaponCooldowns,
             trapCooldowns: trapCooldowns,
-            armedWeapon: armedWeapon
+            armedWeapon: armedWeapon,
+            perkChoices: pendingPerkChoices
         ))
     }
 
