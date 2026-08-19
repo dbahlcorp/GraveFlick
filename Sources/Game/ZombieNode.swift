@@ -292,7 +292,7 @@ final class ZombieNode: SKNode {
     /// another zombie being thrown/knocked into it (see GameScene.didBegin's zombie-zombie
     /// collision branch) before it can be grabbed at all — a mechanic gate, not a health-threshold
     /// cosmetic like `armorBroken` above. Empty for every other kind.
-    private var armorPlateNodes: [SKShapeNode] = []
+    private var armorPlateNodes: [SKNode] = []
     private(set) var armorPlateCount = 0
     var isArmored: Bool { armorPlateCount > 0 }
     var onArmorFullyStripped: (() -> Void)?
@@ -415,44 +415,77 @@ final class ZombieNode: SKNode {
         applyRestPose()
     }
 
-    /// THE BOUNCER's whole identity: three plate overlays parented to `rig` (so they ride along
-    /// with its walk-bob/pose transforms like any other part) standing between it and
-    /// `canBeGrabbed`. No new art — riot's existing torso/shoulder silhouette already reads as
-    /// armored, so procedural shapes are enough to show progress being chipped away.
+    /// THE BOUNCER's armor overlays, parented to `rig` (so they ride along with its walk-bob/pose
+    /// transforms like any other part) standing between it and `canBeGrabbed`. All three are real
+    /// art now (shoulders, torso, belt). Order matters: `armorPlateNodes` is built bottom-to-top
+    /// so `knockArmorPlate`'s `popLast()` strips the belt first, the chest plate second, and the
+    /// shoulder guard — the biggest, most dramatic piece — last, right as the armor fully comes off.
     private func buildArmorPlates() {
         guard kind == .bouncer else { return }
         let torsoWidth = sprites[.torso]?.size.width ?? kind.size.width * 0.5
         let torsoHeight = sprites[.torso]?.size.height ?? kind.size.height * 0.5
-        let positions = [
-            CGPoint(x: 0, y: torsoHeight * 0.16),
-            CGPoint(x: -torsoWidth * 0.30, y: torsoHeight * 0.30),
-            CGPoint(x: torsoWidth * 0.22, y: torsoHeight * 0.04)
-        ]
-        for point in positions {
-            let plate = SKShapeNode(rectOf: CGSize(width: torsoWidth * 0.38, height: torsoHeight * 0.24), cornerRadius: 4)
-            plate.fillColor = SKColor(red: 0.50, green: 0.53, blue: 0.58, alpha: 1)
-            plate.strokeColor = SKColor(red: 0.84, green: 0.88, blue: 0.92, alpha: 0.85)
-            plate.lineWidth = 1.5
-            plate.position = point
-            plate.zPosition = 8
-            plate.zRotation = CGFloat.random(in: -0.12...0.12)
-            rig.addChild(plate)
-            armorPlateNodes.append(plate)
-        }
+
+        let shoulderWidth = torsoWidth * 0.95
+        let shoulders = SKSpriteNode(
+            texture: SKTexture(imageNamed: "bouncer_armor_shoulders"),
+            size: CGSize(width: shoulderWidth, height: shoulderWidth * (944.0 / 1667.0))
+        )
+        shoulders.position = CGPoint(x: 0, y: torsoHeight * 0.40)
+        shoulders.zPosition = 8
+        rig.addChild(shoulders)
+
+        let chestWidth = torsoWidth * 0.78
+        let chest = SKSpriteNode(
+            texture: SKTexture(imageNamed: "bouncer_armor_torso"),
+            size: CGSize(width: chestWidth, height: chestWidth * (1024.0 / 1536.0))
+        )
+        chest.position = CGPoint(x: 0, y: torsoHeight * 0.12)
+        chest.zPosition = 8
+        rig.addChild(chest)
+
+        let beltWidth = torsoWidth * 0.9
+        let belt = SKSpriteNode(
+            texture: SKTexture(imageNamed: "bouncer_armor_belt"),
+            size: CGSize(width: beltWidth, height: beltWidth * (977.0 / 1610.0))
+        )
+        belt.position = CGPoint(x: 0, y: -torsoHeight * 0.30)
+        belt.zPosition = 8
+        rig.addChild(belt)
+
+        armorPlateNodes = [shoulders, chest, belt]
         armorPlateCount = armorPlateNodes.count
     }
 
     /// Called by GameScene when another zombie is genuinely thrown/knocked into the Bouncer (not
-    /// just incidental crowd contact — see the caller). Pops one plate off with a quick scatter,
-    /// and once the last one's gone, flags it grabbable via `canBeGrabbed` and fires
+    /// just incidental crowd contact — see the caller). Knocks one plate loose and drops it to the
+    /// ground, and once the last one's gone, flags it grabbable via `canBeGrabbed` and fires
     /// `onArmorFullyStripped` for GameScene to announce.
     @discardableResult
     func knockArmorPlate() -> Bool {
         guard isArmored, let plate = armorPlateNodes.popLast() else { return false }
         armorPlateCount -= 1
-        let destination = CGPoint(x: plate.position.x + CGFloat.random(in: -70...70), y: plate.position.y + CGFloat.random(in: 40...80))
+        // Detach from `rig` into the zombie's own parent (the same world layer every other prop
+        // in the fight lives in) *before* animating — move(toParent:) preserves the plate's
+        // current absolute position/rotation, so it falls straight from wherever it actually was
+        // instead of staying hostage to `rig`'s walk-bob, a later flick, or the zombie's own
+        // eventual removal cutting the fall short mid-animation.
+        if let parent {
+            plate.move(toParent: parent)
+        }
+        let sideDrift = CGFloat.random(in: -60...60)
+        let fallTarget = CGPoint(x: plate.position.x + sideDrift, y: plate.position.y - CGFloat.random(in: 78...112))
+        let fall = SKAction.move(to: fallTarget, duration: 0.34)
+        fall.timingMode = .easeIn
+        let tumble = SKAction.rotate(byAngle: (sideDrift >= 0 ? 1 : -1) * CGFloat.random(in: 3...6), duration: 0.34)
+        let bounce = SKAction.sequence([
+            .moveBy(x: sideDrift * 0.12, y: 10, duration: 0.08),
+            .moveBy(x: 0, y: -10, duration: 0.09)
+        ])
         plate.run(.sequence([
-            .group([.move(to: destination, duration: 0.32), .rotate(byAngle: CGFloat.random(in: -3...3), duration: 0.32), .fadeOut(withDuration: 0.34)]),
+            .group([fall, tumble]),
+            bounce,
+            .wait(forDuration: 0.6),
+            .fadeOut(withDuration: 0.35),
             .removeFromParent()
         ]))
         hitReactionTime = 0.16
