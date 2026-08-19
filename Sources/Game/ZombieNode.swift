@@ -1079,9 +1079,12 @@ final class ZombieNode: SKNode {
         }
     }
 
+    /// Rust-brown "exposed" color for a health-threshold armor-crack cosmetic — see playArmorBreak.
+    private var armorExposedTint: SKColor { SKColor(red: 0.46, green: 0.25, blue: 0.18, alpha: 1) }
+
     private func playArmorBreak() {
         guard let torso = sprites[.torso] else { return }
-        torso.color = SKColor(red: 0.46, green: 0.25, blue: 0.18, alpha: 1)
+        torso.color = armorExposedTint
         torso.colorBlendFactor = 0.28
         for index in 0..<5 {
             let shard = SKShapeNode(rectOf: CGSize(width: 7, height: 4), cornerRadius: 1)
