@@ -10,6 +10,11 @@ enum AppScreen: Equatable {
 final class AppModel: ObservableObject {
     @Published var screen: AppScreen = .menu
     @Published var session: GameSessionModel?
+    /// Weapon/trap titles newly granted by the level just completed (see
+    /// ProgressStore.grantCampaignUnlocks) — a plain before/after set diff around `store.complete`,
+    /// since PlayerProgress is a value type so `before` is a genuine snapshot, not a live reference.
+    /// Cleared at the start of every `start(_:)` so a stale list can't linger into the next session.
+    @Published private(set) var newlyUnlocked: [String] = []
     let store = ProgressStore()
 
     init() {
@@ -18,8 +23,15 @@ final class AppModel: ObservableObject {
     }
 
     func start(_ level: GameLevel) {
+        newlyUnlocked = []
         session = GameSessionModel(level: level, progress: store.progress, settings: store.settings) { [weak self] result in
-            self?.store.complete(result)
+            guard let self else { return }
+            let before = self.store.progress.unlockedWeapons.union(self.store.progress.unlockedTraps)
+            self.store.complete(result)
+            let after = self.store.progress.unlockedWeapons.union(self.store.progress.unlockedTraps)
+            self.newlyUnlocked = after.subtracting(before)
+                .compactMap { raw in WeaponKind(rawValue: raw)?.title ?? TrapKind(rawValue: raw)?.title }
+                .sorted()
         }
         screen = .game
         SoundManager.shared.apply(store.settings)
@@ -1040,6 +1052,15 @@ private struct GameContainerView: View {
             }
             Text("SCORE \(result.score)  •  +\(result.reward) COINS")
                 .font(.headline.weight(.black)).foregroundStyle(.white.opacity(0.72))
+            // Only ever populated by a campaign win (see AppModel.start) — an endless run's
+            // reward never touches unlockedWeapons/unlockedTraps, so this stays empty there.
+            if !model.newlyUnlocked.isEmpty {
+                Text("UNLOCKED FOR NIGHT SHIFT: \(model.newlyUnlocked.joined(separator: ", "))")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.cyan)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 8)
+            }
             HStack {
                 Button("LEVELS") { model.leaveGame(to: .levels) }.buttonStyle(.bordered)
                 if result.won, result.levelID < GameLevel.campaign.count {
