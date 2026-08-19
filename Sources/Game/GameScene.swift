@@ -1518,7 +1518,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
         }
         if killTally >= 10 { recordFeat("chain_reaction_10") }
-        playCombatVFX(.explosion, at: point, size: 270, direction: 1)
+        playCombatVFX(.volatileBurst, at: point, size: 270, direction: 1)
         SoundManager.shared.play(.explosion)
         SoundManager.shared.duckMusic(strength: 0.48, duration: 0.42)
         shakeCamera(intensity: 1.2)
@@ -2437,10 +2437,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         case .pavementImpact: .darkGray
         case .zombieSplatter: SKColor(red: 0.48, green: 0.76, blue: 0.16, alpha: 1)
         case .explosion: .orange
+        // Brighter/more acidic than zombieSplatter's green — matches the toxic ooze in the
+        // vfx_volatile_burst art rather than reusing the shared explosion's plain orange.
+        case .volatileBurst: SKColor(red: 0.68, green: 0.95, blue: 0.22, alpha: 1)
         case .freezerBurst: .cyan
         }
         if !settings.reducedMotion {
-            playDirectionalDebris(at: point, color: debrisColor, direction: direction, count: effect == .explosion ? 14 : 8)
+            playDirectionalDebris(at: point, color: debrisColor, direction: direction, count: effect == .explosion || effect == .volatileBurst ? 14 : 8)
         }
     }
 
