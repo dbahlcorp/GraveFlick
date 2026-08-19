@@ -50,6 +50,13 @@ enum Achievements {
     }
 
     static func coinReward(for id: String) -> Int {
-        all.first { $0.id == id }?.tier.coinReward ?? AchievementTier.skill.coinReward
+        guard let match = all.first(where: { $0.id == id }) else {
+            // A typo'd or removed id here would otherwise silently pay skill-tier coins for an
+            // achievement that can never appear in CreditsView — loud in debug/test builds where
+            // it's cheap to catch, not a crash risk for a released build.
+            assertionFailure("Unknown achievement id \"\(id)\" — check Achievements.all and every recordFeat/append call site for a mismatch.")
+            return AchievementTier.skill.coinReward
+        }
+        return match.tier.coinReward
     }
 }

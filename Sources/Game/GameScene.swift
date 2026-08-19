@@ -875,6 +875,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     private func presentPerkChoices() {
+        // The 1s delay above means the run can end before this fires (e.g. the player dies in
+        // that window) — without this guard it would re-pause and re-open the picker on top of
+        // an already-shown results screen.
+        guard !gameOver else { return }
         pendingPerkChoices = Array(Perk.allCases.shuffled().prefix(3))
         isGameplayPaused = true
         notifyDelegate()
@@ -1077,7 +1081,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                     shakeCamera(intensity: 0.4)
                 }
                 if zombie.damage(contact.collisionImpulse / 42) {
-                    if zombie.kind.isBoss { recordFeat("boss_friendly_fire") }
+                    // Matches the armor-strip check above: only counts as "colliding it with
+                    // another zombie" when the other one was actually thrown/knocked in, not an
+                    // ordinary crowd-pressure kill the boss happened to be standing in.
+                    if zombie.kind.isBoss, let otherZombie, otherZombie.isThrown { recordFeat("boss_friendly_fire") }
                     defeat(zombie, reason: .collision)
                 } else if zombie.canBeKnockedBack, let otherZombie {
                     knockback(zombie, awayFrom: otherZombie.position, magnitude: contact.collisionImpulse)

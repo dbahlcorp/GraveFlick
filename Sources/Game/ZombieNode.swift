@@ -471,6 +471,11 @@ final class ZombieNode: SKNode {
         // eventual removal cutting the fall short mid-animation.
         if let parent {
             plate.move(toParent: parent)
+            // zPosition 8 only meant "above this zombie's own body parts" while the plate was a
+            // child of `rig`; as a sibling of every other world-layer node now, it needs to beat
+            // a walking zombie's own zPosition (10, see GameScene.spawnZombie) or the plate falls
+            // invisibly behind the Bouncer's torso instead of visibly dropping off in front of it.
+            plate.zPosition = 15
         }
         let sideDrift = CGFloat.random(in: -60...60)
         let fallTarget = CGPoint(x: plate.position.x + sideDrift, y: plate.position.y - CGFloat.random(in: 78...112))
@@ -744,7 +749,11 @@ final class ZombieNode: SKNode {
         // rather than relying on every caller to remember to check first.
         guard !isDefeated, !isGrabbed else { return }
         beginAirborne()
-        wasPlayerThrown = false
+        // Deliberately NOT resetting wasPlayerThrown here: it's already false unless release()
+        // set it, and if it did, this launch is an explosion/knockback catching a zombie that's
+        // still mid-flight from the player's own throw — that shouldn't erase the credit before
+        // it lands (see GameScene's GRACEFUL_WAVE tracking). resumeWalking() is the actual reset
+        // point, once the flight fully resolves.
         // Magnitude is intentionally NOT divided by kind.throwResistance here, unlike release():
         // explodeVolatile/fireScatterblast/throwExplosive already tune their radialImpulse
         // constants per-weapon assuming this applies them as-is, and dividing again here would

@@ -134,7 +134,12 @@ def verify(root: Path) -> None:
             committed = root / relative
             generated = generated_root / relative
             comparison = filecmp.dircmp(committed, generated)
-            failures.extend(str(relative / name) for name in comparison.left_only + comparison.right_only + comparison.diff_files + comparison.funny_files)
+            # left_only (committed files the atlas doesn't produce) is deliberately excluded: these
+            # directories also hold hand-supplied art dropped in outside the atlas pipeline (e.g.
+            # vfx_volatile_burst_*, bouncer_armor_*), which this check has no way to regenerate and
+            # was never meant to gate. Only flag drift in the atlas-managed subset itself — a frame
+            # the atlas should produce that's missing (right_only) or stale (diff_files/funny_files).
+            failures.extend(str(relative / name) for name in comparison.right_only + comparison.diff_files + comparison.funny_files)
         if failures:
             raise SystemExit("Generated animation assets are stale or missing:\n" + "\n".join(sorted(failures)))
     print("Animation asset verification passed.")
