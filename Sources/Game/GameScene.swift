@@ -70,41 +70,35 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var detonatables: [ObjectIdentifier: Detonatable] = [:]
     private var lastUpdateTime: TimeInterval = 0
     var elapsedTime: TimeInterval = 0
-    private var timeSinceSpawn: TimeInterval = 0
     private var movementAudioRemaining: TimeInterval = 0.7
     var health: Int
-    var wave = 1
-    private var waveStatus = "WAVE 1"
-    private var waveStatusHighlighted = false
-    var spawnedInWave = 0
-    var currentWaveTarget = 0
-    private var intermissionRemaining: TimeInterval = 0
+    /// Wave timing/progression and the WaveModifier runtime.
+    private let spawnDirector = SpawnDirector()
+    var wave: Int { spawnDirector.wave }
+    var spawnedInWave: Int {
+        get { spawnDirector.spawnedInWave }
+        set { spawnDirector.spawnedInWave = newValue }
+    }
+    var currentWaveTarget: Int { spawnDirector.currentWaveTarget }
     /// Kill scoring, combo tracking, and their on-kill feedback popups.
     private let comboSystem = ComboSystem()
     var specialCharge = 0.0
     private var weaponCooldowns: [WeaponKind: TimeInterval] = [:]
     private var trapCooldowns: [TrapKind: TimeInterval] = [:]
     var gameOver = false
-    private var spawningFinished = false
     private var didBuildWorld = false
-    private var spawnedBossWaves: Set<Int> = []
     /// Roguelite perk state and mechanical bonuses — endless-only, in-memory for this run only
     /// (never touches ProgressStore/PlayerProgress, which is permanent cross-run progression).
     let perkSystem = PerkSystem()
-    /// Endless-only, re-rolled once per wave (see rollWaveModifier) — unlike `perkSystem`'s stacks,
-    /// exclusive (only one at a time) and lasts exactly one wave rather than accumulating.
-    private var activeModifier: WaveModifier?
-    private var modifierOverlayNode: SKNode?
-    private var rolledModifierWaves: Set<Int> = []
     /// Skill-based feats performed this run ("how you played," not score/completion thresholds —
     /// see LevelResult.feats), folded into `finish(won:)`'s result and granted as ordinary
     /// achievements by ProgressStore.complete. Accumulates for the whole run; never cleared mid-run.
     private var achievedFeats: Set<String> = []
     /// Tracks the GRACEFUL_WAVE feat ("clear a wave without a grabbed zombie touching the
-    /// ground") across whichever wave-transition path is active (endless's `wave = newWave` or
-    /// campaign's updateCampaignWave) — checked centrally in `update()` on any change to `wave`
-    /// rather than duplicated in both branches. 0 is a sentinel for "not yet synced," so the very
-    /// first frame doesn't look like a completed wave.
+    /// ground") across whichever wave-transition path is active (SpawnDirector's
+    /// updateEndlessWave or updateCampaignWave) — checked centrally in `update()` on any change
+    /// to `wave` rather than duplicated in both branches. 0 is a sentinel for "not yet synced,"
+    /// so the very first frame doesn't look like a completed wave.
     private var lastObservedWaveForFeats = 0
     private var playerThrewThisWave = false
     private var playerThrownZombieGroundedThisWave = false
@@ -118,8 +112,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// wave ramp, sandbox slider) so it scales zombies uniformly without touching their relative
     /// per-kind balance.
     private let zombieSpeedScale: CGFloat = 0.85
-    private var sandboxSpeed: CGFloat = 1
-    private var sandboxSpawnBurst = 1
     var sandboxDefeats = 0
     var finishingReplayUsed = false
     private var sceneryDamage = 0
@@ -138,7 +130,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var flickMultiplier: CGFloat { (1 + CGFloat(progress.upgradeLevel(.flickTraining)) * 0.10) * perkSystem.flickVelocityBonus }
     private var rapidGearLevel: Int { progress.upgradeLevel(.rapidGear) }
     private var groundY: CGFloat { max(70, size.height * 0.13) }
-    private var houseFrame: CGRect {
+    var houseFrame: CGRect {
         let width = min(310, size.width * 0.29)
         return CGRect(x: size.width * 0.5 - width * 0.5, y: groundY, width: width, height: min(280, size.height * 0.38))
     }
@@ -165,6 +157,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         didBuildWorld = true
         perkSystem.host = self
         comboSystem.host = self
+        spawnDirector.host = self
         backgroundColor = level.skyColor
         physicsWorld.gravity = CGVector(dx: 0, dy: level.modifier == .lowGravity ? -3.8 : -8.8)
         physicsWorld.contactDelegate = self
@@ -172,7 +165,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         buildEnvironment()
         buildBossHUD()
         SoundManager.shared.updateGameplayMix(wave: wave, healthFraction: 1)
-        if level.isSandbox { waveStatus = "SANDBOX" }
+        if level.isSandbox { spawnDirector.waveStatus = "SANDBOX" }
         notifyDelegate()
         announce(text: level.title.uppercased(), color: .white)
         if !level.isSandbox {
@@ -195,61 +188,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let deltaTime = lastUpdateTime == 0 ? 0 : min(1.0 / 20.0, currentTime - lastUpdateTime)
         lastUpdateTime = currentTime
         elapsedTime += deltaTime
-        timeSinceSpawn += deltaTime
         tickCooldowns(deltaTime)
         movementAudioRemaining -= deltaTime
 
         if level.isSandbox {
             // Sandbox spawns only through explicit player controls.
         } else if level.isEndless {
-            let newWave = Int(elapsedTime / level.waveDuration) + 1
-            if newWave != wave {
-                wave = newWave
-                SoundManager.shared.updateGameplayMix(wave: wave, healthFraction: CGFloat(health) / CGFloat(max(1, startingHealth)))
-                let incomingBoss = resolvedBossKind(forWave: wave)
-                rollWaveModifier()
-                if let activeModifier {
-                    announce(
-                        text: incomingBoss.map { "\($0.displayName) INCOMING" } ?? "WAVE \(wave)", color: .white,
-                        subtitle: activeModifier.title, subtitleColor: modifierColor(activeModifier)
-                    )
-                } else {
-                    announce(text: incomingBoss.map { "\($0.displayName) INCOMING" } ?? "WAVE \(wave)", color: .white)
-                }
-                // Same cadence as the boss wave check just above — every 5th wave doubles as both
-                // a boss intro and a "level up before the fight" perk pick.
-                perkSystem.offerChoices(forWave: wave)
-            }
-            waveStatus = activeModifier.map { "SURVIVE — \($0.badge)" } ?? "SURVIVE"
-            waveStatusHighlighted = activeModifier != nil
-            let difficulty = GameRules.survivalDifficulty(wave: wave, baseSpawnInterval: level.baseSpawnInterval)
-            // RUSH HOUR: noticeably faster and denser than the wave's own numeric ramp alone would
-            // ever get, for exactly one wave — meant to spike, not to be the new normal.
-            let interval = activeModifier == .rushHour ? difficulty.spawnInterval * 0.55 : difficulty.spawnInterval
-            if timeSinceSpawn >= interval {
-                timeSinceSpawn = 0
-                let bossKind = resolvedBossKind(forWave: wave)
-                if let bossKind, !spawnedBossWaves.contains(wave) {
-                    spawnedBossWaves.insert(wave)
-                    spawnZombie(forceWalker: false, bossKind: bossKind)
-                    // DOUBLE BOSS: the wave's other boss kind joins a couple seconds later, once
-                    // the first has had a moment to make its entrance.
-                    if activeModifier == .doubleBoss {
-                        let second = otherBossKind(than: bossKind)
-                        run(.sequence([.wait(forDuration: 2), .run { [weak self] in
-                            guard let self, !self.gameOver else { return }
-                            self.spawnZombie(forceWalker: false, bossKind: second)
-                        }]))
-                    }
-                } else if bossKind == nil {
-                    let spawnCount = activeModifier == .rushHour ? difficulty.spawnCount + 1 : difficulty.spawnCount
-                    for _ in 0..<spawnCount {
-                        spawnZombie(forceWalker: false, forcedKind: modifierForcedSpawnKind())
-                    }
-                }
-            }
+            spawnDirector.updateEndlessWave(deltaTime: deltaTime)
         } else {
-            updateCampaignWave(deltaTime: deltaTime)
+            spawnDirector.updateCampaignWave(deltaTime: deltaTime)
         }
 
         // GRACEFUL_WAVE: works the same way regardless of which branch above actually moved
@@ -271,7 +218,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         for zombie in zombies {
             zombie.updateWalking(deltaTime: deltaTime, reducedMotion: settings.reducedMotion)
             if zombie.isDefeated { continue }
-            if level.isEndless { applyVisibilityModifier(to: zombie) }
+            if level.isEndless { spawnDirector.applyVisibilityModifier(to: zombie) }
             // SKY_LAUNCH: checked every frame while airborne (not just on landing/defeat) so it's
             // caught regardless of what happens next — surviving the fall, landing, or exiting off
             // a side boundary without ever triggering a ground contact.
@@ -289,61 +236,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
 
         notifyDelegate()
-    }
-
-    private func updateCampaignWave(deltaTime: TimeInterval) {
-        if intermissionRemaining > 0 {
-            intermissionRemaining -= deltaTime
-            if intermissionRemaining <= 0 {
-                if spawningFinished {
-                    finish(won: true)
-                } else {
-                    wave += 1
-                    spawnedInWave = 0
-                    timeSinceSpawn = 99
-                    waveStatus = "WAVE \(wave)"
-                    waveStatusHighlighted = false
-                    SoundManager.shared.updateGameplayMix(wave: wave, healthFraction: CGFloat(health) / CGFloat(max(1, startingHealth)))
-                    let boss = GameRules.storyBossKind(levelID: level.id, wave: wave, totalWaves: level.totalWaves)
-                    announce(text: boss.map { "\($0.displayName) INCOMING" } ?? "WAVE \(wave)", color: .white)
-                }
-            }
-            return
-        }
-
-        let bossKind = GameRules.storyBossKind(levelID: level.id, wave: wave, totalWaves: level.totalWaves)
-        let target = bossKind == nil
-            ? GameRules.campaignSpawnCount(wave: wave, waveDuration: level.waveDuration, baseSpawnInterval: level.baseSpawnInterval)
-            : 1
-        currentWaveTarget = target
-        let interval = max(0.48, (level.baseSpawnInterval - Double(wave - 1) * 0.09) * settings.difficulty.spawnRate)
-        if spawnedInWave < target, timeSinceSpawn >= interval {
-            timeSinceSpawn = 0
-            if let bossKind {
-                if !spawnedBossWaves.contains(wave) {
-                    spawnedBossWaves.insert(wave)
-                    spawnZombie(forceWalker: false, bossKind: bossKind)
-                    spawnedInWave += 1
-                }
-            } else {
-                spawnZombie(forceWalker: false)
-                spawnedInWave += 1
-            }
-        }
-
-        let livingCount = activeZombies.filter { !$0.isDefeated }.count
-        if spawnedInWave >= target, livingCount == 0 {
-            spawningFinished = wave >= level.totalWaves
-            intermissionRemaining = 1.25
-            waveStatus = spawningFinished ? "NIGHT CLEARED" : "WAVE \(wave) CLEAR"
-            waveStatusHighlighted = true
-            announce(text: waveStatus, color: SKColor(red: 1, green: 0.77, blue: 0.24, alpha: 1))
-            SoundManager.shared.play(.waveClear)
-        } else {
-            let unspawned = max(0, target - spawnedInWave)
-            waveStatus = "\(livingCount + unspawned) LEFT"
-            waveStatusHighlighted = false
-        }
     }
 
     /// The gesture primitive a weapon's `touchesBegan`/`touchesMoved`/`touchesEnded` aim needs.
@@ -812,7 +704,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
 
     func useSpecial() {
-        guard specialCharge >= 1, !gameOver, activeModifier != .graveTimeDisabled else { return }
+        guard specialCharge >= 1, !gameOver, spawnDirector.activeModifier != .graveTimeDisabled else { return }
         specialCharge = 0
         SoundManager.shared.play(.special)
         SoundManager.shared.duckMusic(strength: 0.34, duration: 0.55)
@@ -839,93 +731,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// one of the three offered cards.
     func choosePerk(_ perk: Perk) { perkSystem.choose(perk) }
 
-    /// Rolls (or clears) this wave's WaveModifier — called once per endless wave transition, right
-    /// before the wave/boss announcement so the two can render as one combined banner. Doesn't
-    /// re-roll if already rolled for this exact wave number (mirrors `offeredPerkWaves`'s guard),
-    /// so resuming from the perk-choice pause on a boss wave can't double-roll.
-    private func rollWaveModifier() {
-        modifierOverlayNode?.removeFromParent()
-        modifierOverlayNode = nil
-        guard !rolledModifierWaves.contains(wave) else { return }
-        rolledModifierWaves.insert(wave)
-        let isBossWave = GameRules.bossKind(forWave: wave) != nil
-        guard wave > 2, Double.random(in: 0..<1) < GameRules.waveModifierChance(wave: wave) else {
-            activeModifier = nil
-            return
-        }
-        // Campaign progress gates the wilder modifiers (see WaveModifier.requiredCampaignLevel) —
-        // fog/rush hour stay available from the start, but e.g. GRAVE TIME OFFLINE only shows up
-        // once the player has actually finished the campaign that taught them to rely on it.
-        let unlockedModifiers = WaveModifier.eligible(forBossWave: isBossWave)
-            .filter { $0.requiredCampaignLevel <= highestCompletedCampaignLevel }
-        let modifier = unlockedModifiers.randomElement()
-        activeModifier = modifier
-        guard let modifier else { return }
-        if modifier == .fog || modifier == .blackout { showModifierOverlay(modifier) }
-    }
-
-    private func modifierColor(_ modifier: WaveModifier) -> SKColor {
-        switch modifier {
-        case .fog: SKColor(white: 0.82, alpha: 1)
-        case .blackout: SKColor(red: 0.55, green: 0.42, blue: 0.95, alpha: 1)
-        case .rushHour: .orange
-        case .heavyweights: SKColor(red: 0.95, green: 0.42, blue: 0.30, alpha: 1)
-        case .explodersOnly: SKColor(red: 0.34, green: 0.90, blue: 0.42, alpha: 1)
-        case .graveTimeDisabled: .cyan
-        case .doubleBoss: SKColor(red: 1, green: 0.24, blue: 0.24, alpha: 1)
-        }
-    }
-
-    /// A translucent full-screen wash — grayish for FOG, near-black for BLACKOUT — layered above
-    /// the environment art but below the HUD/combat VFX zPositions, torn down by the next
-    /// `rollWaveModifier()` call whether or not a new overlay replaces it.
-    private func showModifierOverlay(_ modifier: WaveModifier) {
-        guard !settings.reducedMotion else { return }
-        let overlay = SKShapeNode(rectOf: CGSize(width: size.width + 40, height: size.height + 40))
-        overlay.fillColor = modifier == .blackout ? .black : SKColor(white: 0.7, alpha: 1)
-        overlay.strokeColor = .clear
-        overlay.position = CGPoint(x: size.width / 2, y: size.height / 2)
-        overlay.zPosition = 60
-        overlay.alpha = 0
-        overlay.isUserInteractionEnabled = false
-        world.addChild(overlay)
-        overlay.run(.fadeAlpha(to: modifier == .blackout ? 0.55 : 0.32, duration: 0.6))
-        modifierOverlayNode = overlay
-    }
-
-    /// FOG/BLACKOUT: an approaching zombie fades in from near-invisible as it closes in on the
-    /// diner instead of being clearly visible the moment it spawns off-screen. Only applies while
-    /// a zombie is plainly walking — grabbed/thrown/otherwise-engaged zombies stay fully visible,
-    /// since the player is already actively dealing with them.
-    private func applyVisibilityModifier(to zombie: ZombieNode) {
-        guard let activeModifier, activeModifier == .fog || activeModifier == .blackout,
-              zombie.currentAnimationState == .walking else {
-            zombie.alpha = 1
-            return
-        }
-        let distanceToHouse = abs(zombie.position.x - houseFrame.midX)
-        let revealDistance: CGFloat = activeModifier == .blackout ? 220 : 340
-        let baseAlpha: CGFloat = activeModifier == .blackout ? 0.10 : 0.28
-        let proximity = 1 - min(1, max(0, distanceToHouse / revealDistance))
-        zombie.alpha = baseAlpha + (1 - baseAlpha) * proximity
-    }
-
-    /// HEAVYWEIGHTS/EXPLODERS ONLY: constrains the random pick a plain (non-boss) endless spawn
-    /// would otherwise make from the level's full roster. nil (the default spawn pool) otherwise.
-    private func modifierForcedSpawnKind() -> ZombieKind? {
-        switch activeModifier {
-        case .heavyweights: [.brute, .armored, .riot, .groundskeeper].randomElement()
-        case .explodersOnly: .volatile
-        default: nil
-        }
-    }
-
     /// Picks a random boss kind other than `kind` for DOUBLE BOSS — a list rather than a hardcoded
     /// pair so it automatically includes whatever boss kinds exist as more get added. Restricted
     /// to bosses this campaign progress has actually unlocked, same as `resolvedBossKind`, so
     /// DOUBLE BOSS can't hand a player a boss they haven't earned yet just because it rolled
     /// alongside one they have.
-    private func otherBossKind(than kind: ZombieKind) -> ZombieKind {
+    func otherBossKind(than kind: ZombieKind) -> ZombieKind {
         GameRules.unlockedBossKinds(highestCompletedLevel: highestCompletedCampaignLevel)
             .filter { $0 != kind }.randomElement() ?? .butcher
     }
@@ -934,13 +745,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// subtracting 1 recovers "levels actually beaten" — 0 for a player who's never won a campaign
     /// level. Shared by `resolvedBossKind`, `otherBossKind`, and `rollWaveModifier`'s WaveModifier
     /// gate, so campaign progress means the same thing everywhere endless checks it.
-    private var highestCompletedCampaignLevel: Int { max(0, progress.highestUnlockedLevel - 1) }
+    var highestCompletedCampaignLevel: Int { max(0, progress.highestUnlockedLevel - 1) }
 
     /// The wave's naturally-rotated boss (see GameRules.bossKind), downgraded to `.butcher` if
     /// campaign hasn't unlocked it yet (see GameRules.unlockedBossKinds) — so Colossus/Bouncer
     /// showing up in an endless run means the player actually beat the campaign level that
     /// introduces them, not just that the wave number happened to line up.
-    private func resolvedBossKind(forWave wave: Int) -> ZombieKind? {
+    func resolvedBossKind(forWave wave: Int) -> ZombieKind? {
         guard let natural = GameRules.bossKind(forWave: wave) else { return nil }
         let unlocked = GameRules.unlockedBossKinds(highestCompletedLevel: highestCompletedCampaignLevel)
         return unlocked.contains(natural) ? natural : .butcher
@@ -1180,7 +991,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     func sandboxSpawn(_ kind: ZombieKind) {
         guard level.isSandbox else { return }
-        for _ in 0..<sandboxSpawnBurst { spawnZombie(forceWalker: false, bossKind: kind.isBoss ? kind : nil, forcedKind: kind) }
+        for _ in 0..<spawnDirector.sandboxSpawnBurst { spawnZombie(forceWalker: false, bossKind: kind.isBoss ? kind : nil, forcedKind: kind) }
     }
 
     func sandboxClear() {
@@ -1191,7 +1002,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     func sandboxSetSpeed(_ speed: CGFloat) {
         guard level.isSandbox else { return }
-        sandboxSpeed = min(2.5, max(0.35, speed))
+        spawnDirector.sandboxSpeed = min(2.5, max(0.35, speed))
     }
 
     func sandboxSetGravity(_ gravity: CGFloat) {
@@ -1199,9 +1010,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         physicsWorld.gravity = CGVector(dx: 0, dy: min(-1, max(-18, gravity)))
     }
 
-    func sandboxSetBurst(_ count: Int) { sandboxSpawnBurst = min(12, max(1, count)) }
+    func sandboxSetBurst(_ count: Int) { spawnDirector.sandboxSpawnBurst = min(12, max(1, count)) }
 
-    var sandboxStats: String { "ACTIVE \(activeZombies.count) • DEFEATS \(sandboxDefeats) • SPEED \(String(format: "%.1f", sandboxSpeed))×" }
+    var sandboxStats: String { "ACTIVE \(activeZombies.count) • DEFEATS \(sandboxDefeats) • SPEED \(String(format: "%.1f", spawnDirector.sandboxSpeed))×" }
 
     private func buildBossHUD() {
         bossHUD.zPosition = 190
@@ -1246,7 +1057,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         return zombie.position.y + halfHeight >= frame.minY && zombie.position.y - halfHeight <= frame.maxY
     }
 
-    private func spawnZombie(forceWalker: Bool, bossKind: ZombieKind? = nil, forcedKind: ZombieKind? = nil) {
+    func spawnZombie(forceWalker: Bool, bossKind: ZombieKind? = nil, forcedKind: ZombieKind? = nil) {
         let unlockedCount = min(level.enemyRoster.count, max(1, 1 + wave))
         let roster = Array(level.enemyRoster.prefix(unlockedCount))
         // `roster` is empty only if a level is ever authored with an empty (or off-by-one-sliced)
@@ -1265,7 +1076,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let zombie = ZombieNode(
             kind: kind,
             approachesFromLeft: fromLeft,
-            movementMultiplier: zombieSpeedScale * (difficulty?.speedMultiplier ?? 1) * settings.difficulty.enemySpeed * (level.isSandbox ? sandboxSpeed : 1),
+            movementMultiplier: zombieSpeedScale * (difficulty?.speedMultiplier ?? 1) * settings.difficulty.enemySpeed * (level.isSandbox ? spawnDirector.sandboxSpeed : 1),
             healthMultiplier: (difficulty?.healthMultiplier ?? 1) * settings.difficulty.enemyHealth,
             dismembermentEnabled: settings.goreEnabled
         )
@@ -2069,7 +1880,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         for key in trapCooldowns.keys { trapCooldowns[key] = max(0, trapCooldowns[key, default: 0] - deltaTime) }
     }
 
-    private func finish(won: Bool) {
+    func finish(won: Bool) {
         guard !gameOver else { return }
         gameOver = true
         // touchesMoved/Ended don't check `gameOver` (only touchesBegan does), so a weapon that
@@ -2150,8 +1961,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         gameDelegate?.gameScene(self, didUpdate: GameHUDSnapshot(
             score: comboSystem.score,
             wave: wave,
-            waveStatus: waveStatus,
-            waveStatusHighlighted: waveStatusHighlighted,
+            waveStatus: spawnDirector.waveStatus,
+            waveStatusHighlighted: spawnDirector.waveStatusHighlighted,
             health: health,
             maximumHealth: startingHealth,
             specialCharge: specialCharge,
@@ -2319,7 +2130,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// `subtitle` (e.g. a wave modifier's banner text) renders as a second, smaller line under
     /// `text` on the same fade timing, so a wave announcement and a modifier announcement that
     /// land on the same wave read as one coordinated banner instead of two overlapping labels.
-    private func announce(text: String, color: SKColor, subtitle: String? = nil, subtitleColor: SKColor = .white) {
+    func announce(text: String, color: SKColor, subtitle: String? = nil, subtitleColor: SKColor = .white) {
         let label = SKLabelNode(fontNamed: "AvenirNext-Heavy")
         label.text = text
         label.fontSize = 42
@@ -2468,3 +2279,4 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
 extension GameScene: PerkSystemHost {}
 extension GameScene: ComboSystemHost {}
+extension GameScene: SpawnDirectorHost {}

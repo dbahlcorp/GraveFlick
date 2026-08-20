@@ -4,6 +4,7 @@ import SpriteKit
 /// combo-event checks apply, and gore/VFX intensity/style (see GameScene.spawnPhysicsDebris).
 enum DefeatReason { case impact, collision, weapon, trap, thrownOut, explosion }
 
+@MainActor
 protocol ComboSystemHost: AnyObject {
     var world: SKNode { get }
     var size: CGSize { get }
@@ -38,6 +39,10 @@ protocol ComboSystemHost: AnyObject {
 /// Kill scoring, combo tracking, and the on-kill feedback (combo/event/score popups) it triggers.
 /// Owned by GameScene via `comboSystem`. `defeat(_:reason:...)` is the single entry point every
 /// weapon/trap/collision/impact/thrown-out death routes through.
+///
+/// @MainActor because GameScene (its sole host/caller) is implicitly main-actor-isolated via
+/// SKScene, and defeat() calls SoundManager (also @MainActor) directly.
+@MainActor
 final class ComboSystem {
     weak var host: ComboSystemHost?
 

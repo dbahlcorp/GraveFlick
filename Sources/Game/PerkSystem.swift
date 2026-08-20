@@ -1,5 +1,6 @@
 import SpriteKit
 
+@MainActor
 protocol PerkSystemHost: AnyObject {
     var isGameplayPaused: Bool { get set }
     var gameOver: Bool { get }
@@ -10,6 +11,10 @@ protocol PerkSystemHost: AnyObject {
 /// Endless-mode roguelite perk state and the mechanical bonuses every perk hook reads — see
 /// `Perk` (Perks.swift) for the enum itself. Owned by GameScene via `perkSystem`; never persisted
 /// past the run (unlike PlayerProgress's permanent upgrades).
+///
+/// @MainActor because GameScene (its sole host/caller) is implicitly main-actor-isolated via
+/// SKScene, and this needs to match so cross-references type-check.
+@MainActor
 final class PerkSystem {
     weak var host: PerkSystemHost?
 
