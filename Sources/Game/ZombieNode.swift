@@ -27,10 +27,9 @@ enum ZombieKind: String, CaseIterable, Codable {
         }
     }
 
-    /// The Bouncer has no art of its own — it reuses `riot`'s rig at boss scale (see ZombieNode's
-    /// armor-plate overlay for what actually makes it read as a distinct boss rather than a big
-    /// riot zombie).
-    var assetName: String { self == .bouncer ? ZombieKind.riot.rawValue : rawValue }
+    /// Every zombie kind owns a complete articulated rig. The Bouncer's removable armor plates
+    /// are layered over its dedicated base body below.
+    var assetName: String { rawValue }
 
     /// Regular kinds are scaled to ~82% of the original art size, then shrunk again to ~55% of that
     /// on top (Zombie Smash-style small sprites so the play field reads as much larger) — physics
