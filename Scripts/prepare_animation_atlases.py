@@ -3,11 +3,78 @@
 from __future__ import annotations
 
 import argparse
+from collections import deque
 import filecmp
 from pathlib import Path
 import tempfile
 
 from PIL import Image
+
+
+def remove_edge_fragments(image: Image.Image, alpha_threshold: int = 8) -> Image.Image:
+    """Remove disconnected art leaking in from a neighboring atlas cell.
+
+    Authored atlas subjects occasionally cross a nominal cell boundary. The wanted subject is the
+    largest connected alpha component; unwanted neighboring fragments are smaller components that
+    touch the cropped cell edge. Detached in-cell details such as shell casings, sound waves, sparks,
+    and debris are preserved because they do not enter through an edge.
+    """
+    rgba = image.convert("RGBA")
+    alpha = rgba.getchannel("A")
+    width, height = rgba.size
+    visible = bytearray(1 if value >= alpha_threshold else 0 for value in alpha.get_flattened_data())
+    visited = bytearray(width * height)
+    components: list[tuple[list[int], bool]] = []
+
+    for start, is_visible in enumerate(visible):
+        if not is_visible or visited[start]:
+            continue
+        queue = deque([start])
+        visited[start] = 1
+        pixels: list[int] = []
+        touches_edge = False
+        while queue:
+            index = queue.popleft()
+            pixels.append(index)
+            x = index % width
+            y = index // width
+            touches_edge = touches_edge or x == 0 or y == 0 or x == width - 1 or y == height - 1
+            if x > 0:
+                neighbor = index - 1
+                if visible[neighbor] and not visited[neighbor]:
+                    visited[neighbor] = 1
+                    queue.append(neighbor)
+            if x + 1 < width:
+                neighbor = index + 1
+                if visible[neighbor] and not visited[neighbor]:
+                    visited[neighbor] = 1
+                    queue.append(neighbor)
+            if y > 0:
+                neighbor = index - width
+                if visible[neighbor] and not visited[neighbor]:
+                    visited[neighbor] = 1
+                    queue.append(neighbor)
+            if y + 1 < height:
+                neighbor = index + width
+                if visible[neighbor] and not visited[neighbor]:
+                    visited[neighbor] = 1
+                    queue.append(neighbor)
+        components.append((pixels, touches_edge))
+
+    if not components:
+        return rgba
+
+    largest_index = max(range(len(components)), key=lambda index: len(components[index][0]))
+    pixels = rgba.load()
+    for index, (component, touches_edge) in enumerate(components):
+        if index == largest_index or not touches_edge:
+            continue
+        for offset in component:
+            x = offset % width
+            y = offset // width
+            red, green, blue, _ = pixels[x, y]
+            pixels[x, y] = (red, green, blue, 0)
+    return rgba
 
 
 def remove_border_background(image: Image.Image, tolerance: int = 38) -> Image.Image:
@@ -47,6 +114,7 @@ def crop_cells(source: Path, destination: Path, rows: int, columns: int, names: 
             raise RuntimeError(f"Empty cell for {name}")
         if key:
             frame = remove_border_background(frame)
+        frame = remove_edge_fragments(frame)
         alpha = frame.getchannel("A")
         bbox = alpha.getbbox()
         if bbox is None:
@@ -68,6 +136,7 @@ def crop_selected(source: Path, destination: Path, rows: int, columns: int, sele
         frame = image.crop((column * cell_width, row * cell_height, (column + 1) * cell_width, (row + 1) * cell_height))
         if key:
             frame = remove_border_background(frame)
+        frame = remove_edge_fragments(frame)
         bbox = frame.getchannel("A").getbbox()
         if bbox is None:
             raise RuntimeError(f"No visible pixels for {name}")
@@ -83,6 +152,7 @@ def crop_boxes(source: Path, destination: Path, selections: list[tuple[tuple[int
     destination.mkdir(parents=True, exist_ok=True)
     for box, name in selections:
         frame = remove_border_background(image.crop(box))
+        frame = remove_edge_fragments(frame)
         bbox = frame.getchannel("A").getbbox()
         if bbox is None:
             raise RuntimeError(f"No visible pixels for {name}")
@@ -136,7 +206,7 @@ def verify(root: Path) -> None:
             comparison = filecmp.dircmp(committed, generated)
             # left_only (committed files the atlas doesn't produce) is deliberately excluded: these
             # directories also hold hand-supplied art dropped in outside the atlas pipeline (e.g.
-            # vfx_volatile_burst_*, bouncer_armor_*), which this check has no way to regenerate and
+            # vfx_volatile_burst_*), which this check has no way to regenerate and
             # was never meant to gate. Only flag drift in the atlas-managed subset itself — a frame
             # the atlas should produce that's missing (right_only) or stale (diff_files/funny_files).
             failures.extend(str(relative / name) for name in comparison.right_only + comparison.diff_files + comparison.funny_files)

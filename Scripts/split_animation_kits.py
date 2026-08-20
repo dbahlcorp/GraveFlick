@@ -2,6 +2,8 @@ from pathlib import Path
 
 from PIL import Image
 
+from prepare_animation_atlases import remove_edge_fragments
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "ArtSource" / "AnimationKits"
@@ -26,7 +28,7 @@ def split_sheet(kind: str) -> None:
         top = row * cell_height
         right = image.width if column == 2 else (column + 1) * cell_width
         bottom = image.height if row == 1 else (row + 1) * cell_height
-        cell = image.crop((left, top, right, bottom))
+        cell = remove_edge_fragments(image.crop((left, top, right, bottom)))
         alpha_box = cell.getchannel("A").getbbox()
         if alpha_box is None:
             raise RuntimeError(f"{kind}/{part} contains no visible pixels")

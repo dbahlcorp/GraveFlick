@@ -419,42 +419,40 @@ final class ZombieNode: SKNode {
         applyRestPose()
     }
 
-    /// THE BOUNCER's armor overlays, parented to `rig` (so they ride along with its walk-bob/pose
-    /// transforms like any other part) standing between it and `canBeGrabbed`. All three are real
-    /// art now (shoulders, torso, belt). Order matters: `armorPlateNodes` is built bottom-to-top
-    /// so `knockArmorPlate`'s `popLast()` strips the belt first, the chest plate second, and the
-    /// shoulder guard — the biggest, most dramatic piece — last, right as the armor fully comes off.
+    /// THE BOUNCER's armor overlays, parented directly to its torso so every plate follows the
+    /// torso's walk, attack, grabbed, and airborne rotations instead of floating at the rig root.
+    /// Order matters: `armorPlateNodes` is built bottom-to-top so `knockArmorPlate`'s `popLast()`
+    /// strips the belt first, the chest plate second, and the shoulder yoke last.
     private func buildArmorPlates() {
-        guard kind == .bouncer else { return }
-        let torsoWidth = sprites[.torso]?.size.width ?? kind.size.width * 0.5
-        let torsoHeight = sprites[.torso]?.size.height ?? kind.size.height * 0.5
+        guard kind == .bouncer, let torso = sprites[.torso] else { return }
+        let torsoWidth = torso.size.width
+        let torsoHeight = torso.size.height
 
-        let shoulderWidth = torsoWidth * 0.95
-        let shoulders = SKSpriteNode(
-            texture: SKTexture(imageNamed: "bouncer_armor_shoulders"),
-            size: CGSize(width: shoulderWidth, height: shoulderWidth * (944.0 / 1667.0))
-        )
-        shoulders.position = CGPoint(x: 0, y: torsoHeight * 0.40)
-        shoulders.zPosition = 8
-        rig.addChild(shoulders)
+        func armorSprite(named name: String, width: CGFloat) -> SKSpriteNode {
+            let texture = SKTexture(imageNamed: name)
+            texture.filteringMode = .linear
+            let sourceSize = texture.size()
+            let aspectHeight = sourceSize.width > 0 ? sourceSize.height / sourceSize.width : 1
+            return SKSpriteNode(texture: texture, size: CGSize(width: width, height: width * aspectHeight))
+        }
 
-        let chestWidth = torsoWidth * 0.78
-        let chest = SKSpriteNode(
-            texture: SKTexture(imageNamed: "bouncer_armor_torso"),
-            size: CGSize(width: chestWidth, height: chestWidth * (1024.0 / 1536.0))
-        )
+        let shoulderWidth = min(kind.size.width * 0.96, torsoWidth * 1.32)
+        let shoulders = armorSprite(named: "bouncer_armor_shoulders", width: shoulderWidth)
+        shoulders.position = CGPoint(x: 0, y: torsoHeight * 0.30)
+        shoulders.zPosition = 2.2
+        torso.addChild(shoulders)
+
+        let chestWidth = torsoWidth * 0.82
+        let chest = armorSprite(named: "bouncer_armor_torso", width: chestWidth)
         chest.position = CGPoint(x: 0, y: torsoHeight * 0.12)
-        chest.zPosition = 8
-        rig.addChild(chest)
+        chest.zPosition = 2.2
+        torso.addChild(chest)
 
-        let beltWidth = torsoWidth * 0.9
-        let belt = SKSpriteNode(
-            texture: SKTexture(imageNamed: "bouncer_armor_belt"),
-            size: CGSize(width: beltWidth, height: beltWidth * (977.0 / 1610.0))
-        )
+        let beltWidth = torsoWidth * 0.92
+        let belt = armorSprite(named: "bouncer_armor_belt", width: beltWidth)
         belt.position = CGPoint(x: 0, y: -torsoHeight * 0.30)
-        belt.zPosition = 8
-        rig.addChild(belt)
+        belt.zPosition = 2.2
+        torso.addChild(belt)
 
         armorPlateNodes = [shoulders, chest, belt]
         armorPlateCount = armorPlateNodes.count
@@ -468,7 +466,7 @@ final class ZombieNode: SKNode {
     func knockArmorPlate() -> Bool {
         guard isArmored, let plate = armorPlateNodes.popLast() else { return false }
         armorPlateCount -= 1
-        // Detach from `rig` into the zombie's own parent (the same world layer every other prop
+        // Detach from the torso into the zombie's own parent (the same world layer every other prop
         // in the fight lives in) *before* animating — move(toParent:) preserves the plate's
         // current absolute position/rotation, so it falls straight from wherever it actually was
         // instead of staying hostage to `rig`'s walk-bob, a later flick, or the zombie's own
