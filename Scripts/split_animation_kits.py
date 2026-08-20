@@ -41,7 +41,10 @@ def split_sheet(kind: str) -> None:
             override_box = override.getchannel("A").getbbox()
             if override_box is None:
                 raise RuntimeError(f"{kind}/{part} override contains no visible pixels")
-            cropped = override.crop(override_box).resize(cropped.size, Image.Resampling.LANCZOS)
+            override_cropped = override.crop(override_box)
+            scale = cropped.height / override_cropped.height
+            target_size = (max(1, round(override_cropped.width * scale)), cropped.height)
+            cropped = override_cropped.resize(target_size, Image.Resampling.LANCZOS)
 
         pad = max(8, round(max(cropped.size) * 0.035))
         output = Image.new("RGBA", (cropped.width + pad * 2, cropped.height + pad * 2))

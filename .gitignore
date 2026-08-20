@@ -5,3 +5,5 @@ build/
 xcuserdata/
 GraveFlick.xcodeproj/
 asc_key.p8
+__pycache__/
+*.pyc
