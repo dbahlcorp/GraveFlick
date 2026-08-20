@@ -22,7 +22,7 @@ def remove_edge_fragments(image: Image.Image, alpha_threshold: int = 8) -> Image
     rgba = image.convert("RGBA")
     alpha = rgba.getchannel("A")
     width, height = rgba.size
-    visible = bytearray(1 if value >= alpha_threshold else 0 for value in alpha.get_flattened_data())
+    visible = bytearray(1 if value >= alpha_threshold else 0 for value in alpha.getdata())
     visited = bytearray(width * height)
     components: list[tuple[list[int], bool]] = []
 
