@@ -7,7 +7,7 @@ final class SoundManager {
     private enum MusicTrack { case menu, gameplay }
 
     enum Effect {
-        case grab, impact, defeat, dinerHit, weapon, special, bowlingRoll, bowlingImpact, waveClear, trap, pickup, victory, loss, ready, heartbeat, zombieVoice, bossRoar, armorBreak, explosion
+        case grab, impact, crunch, defeat, dinerHit, weapon, special, bowlingRoll, bowlingImpact, waveClear, trap, pickup, victory, loss, ready, heartbeat, zombieVoice, bossRoar, armorBreak, explosion
     }
 
     enum ZombieVoiceMoment { case spawn, hurt, attack, defeat }
@@ -381,6 +381,8 @@ final class SoundManager {
             buffer = tone(ToneSpec(frequency: 92, duration: 0.95, volume: 0.19, pitchSweep: 0.78, noiseMix: 0.58, detune: false))
         case .waveClear:
             buffer = fanfare(notes: [392, 523.25, 659.25], noteDuration: 0.10, volume: 0.15)
+        case .crunch:
+            buffer = crunchImpact(intensity: intensity)
         default:
             var toneSpec = spec(for: effect)
             if effect == .defeat {
@@ -440,7 +442,7 @@ final class SoundManager {
         case .bowlingImpact: ToneSpec(frequency: 82, duration: 0.26, volume: 0.27, pitchSweep: 0.48, noiseMix: 0.50, detune: false)
         case .trap: ToneSpec(frequency: 320, duration: 0.18, volume: 0.13, pitchSweep: 0.85, noiseMix: 0.10)
         case .ready: ToneSpec(frequency: 880, duration: 0.05, volume: 0.09, pitchSweep: 1.15, noiseMix: 0, detune: false)
-        case .pickup, .victory, .loss, .heartbeat, .zombieVoice, .bossRoar, .armorBreak, .explosion, .bowlingRoll, .waveClear: ToneSpec(frequency: 660, duration: 0.1, volume: 0.13)
+        case .pickup, .victory, .loss, .heartbeat, .zombieVoice, .bossRoar, .armorBreak, .explosion, .bowlingRoll, .waveClear, .crunch: ToneSpec(frequency: 660, duration: 0.1, volume: 0.13)
         }
     }
 
@@ -553,6 +555,38 @@ final class SoundManager {
             let sample = toneSample * 0.75 + filteredNoise * 0.25
             let decayEnvelope = exp(-progress * 4.2)
             channel[index] = sample * beat.volume * decayEnvelope
+        }
+        return buffer
+    }
+
+    /// A handful of short, randomly-timed noise impulses ("cracks") layered over a fast-decaying
+    /// low thud — reads as something actually breaking, distinct from `.impact`'s soft single-tone
+    /// thump. Reserved for genuinely hard slams (see GameScene.resolveImpact) so it stays a payoff
+    /// rather than the everyday landing sound.
+    private func crunchImpact(intensity: CGFloat) -> AVAudioPCMBuffer? {
+        let punch = Float(max(0.4, min(2.4, intensity)))
+        let duration = 0.15 + Double(punch) * 0.03
+        guard let buffer = makeBuffer(duration: duration), let channel = buffer.floatChannelData?[0] else { return nil }
+        let frames = Int(buffer.frameLength)
+        let sampleRate = format.sampleRate
+        let crackTimes = (0..<Int.random(in: 4...6)).map { _ in Double.random(in: 0...(duration * 0.4)) }
+        var bodyPhase = 0.0
+        var filteredNoise: Float = 0
+        for index in 0..<frames {
+            let time = Double(index) / sampleRate
+            let progress = Double(index) / Double(frames)
+            bodyPhase += 2 * .pi * (66 * pow(0.42, progress)) / sampleRate
+            let body = Float(sin(bodyPhase))
+            filteredNoise = nextFilteredNoise(filteredNoise, smoothing: 0.6)
+            var crackle: Float = 0
+            for crackTime in crackTimes {
+                let delta = time - crackTime
+                guard delta >= 0, delta < 0.016 else { continue }
+                crackle += Float.random(in: -1...1) * Float(pow(1 - delta / 0.016, 3))
+            }
+            let bodyEnvelope = Float(pow(1 - progress, 2.2))
+            let sample = body * 0.46 * bodyEnvelope + filteredNoise * 0.2 * bodyEnvelope + crackle * 0.6
+            channel[index] = Float(tanh(Double(sample * (1 + (punch - 1) * 0.4)))) * 0.24 * punch
         }
         return buffer
     }

@@ -400,6 +400,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // A second, landing-moment hit-stop — separate from InteractionController's
             // release-moment "snap" — so a hard slam gets weight both at the throw and at the payoff.
             hitStop(duration: min(0.14, 0.05 + Double(power) * 0.09), slowFactor: max(0.12, 0.4 - power * 0.22))
+            // Layered on top of the everyday `.impact` thud above — only a genuinely hard slam
+            // earns the extra bone-crunch texture, so it stays a payoff instead of the norm.
+            SoundManager.shared.play(.crunch, intensity: 0.8 + power * 0.9)
             // GROUND ZERO: reuses the same knockback() a weapon/collision hit already sends a
             // walking zombie flying with (see didBegin) — a hard-enough slam radiates the same
             // effect outward to everyone standing nearby.
