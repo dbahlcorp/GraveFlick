@@ -7,6 +7,7 @@ from prepare_animation_atlases import remove_edge_fragments
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "ArtSource" / "AnimationKits"
+OVERRIDES = SOURCE / "Overrides"
 DESTINATION = ROOT / "Resources" / "Art" / "Animated"
 PARTS = (
     ("head", 0, 0),
@@ -28,12 +29,20 @@ def split_sheet(kind: str) -> None:
         top = row * cell_height
         right = image.width if column == 2 else (column + 1) * cell_width
         bottom = image.height if row == 1 else (row + 1) * cell_height
-        cell = remove_edge_fragments(image.crop((left, top, right, bottom)))
-        alpha_box = cell.getchannel("A").getbbox()
+        source_cell = remove_edge_fragments(image.crop((left, top, right, bottom)))
+        alpha_box = source_cell.getchannel("A").getbbox()
         if alpha_box is None:
             raise RuntimeError(f"{kind}/{part} contains no visible pixels")
 
-        cropped = cell.crop(alpha_box)
+        cropped = source_cell.crop(alpha_box)
+        override_path = OVERRIDES / f"{kind}_{part}.png"
+        if override_path.exists():
+            override = remove_edge_fragments(Image.open(override_path).convert("RGBA"))
+            override_box = override.getchannel("A").getbbox()
+            if override_box is None:
+                raise RuntimeError(f"{kind}/{part} override contains no visible pixels")
+            cropped = override.crop(override_box).resize(cropped.size, Image.Resampling.LANCZOS)
+
         pad = max(8, round(max(cropped.size) * 0.035))
         output = Image.new("RGBA", (cropped.width + pad * 2, cropped.height + pad * 2))
         output.alpha_composite(cropped, (pad, pad))

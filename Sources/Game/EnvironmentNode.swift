@@ -43,12 +43,10 @@ final class EnvironmentNode: SKNode {
     }
 
     var hasCompleteAnimatedAtmosphere: Bool {
-        if levelID > 5 { return hasCompleteAsset }
         return (1...3).allSatisfy { SKTexture(imageNamed: "environment_atmosphere_\(levelID)_\($0)").size().width > 1 }
     }
 
     private func addAuthoredAtmosphere(sceneSize: CGSize) {
-        guard levelID <= 5 else { return }
         let frames = (1...3).map { index -> SKTexture in
             let texture = SKTexture(imageNamed: "environment_atmosphere_\(levelID)_\(index)")
             texture.filteringMode = .linear

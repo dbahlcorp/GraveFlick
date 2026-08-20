@@ -189,6 +189,16 @@ def prepare(root: Path, source: Path) -> None:
     crop_cells(source / "environment-atmosphere.png", root / "Resources" / "Art" / "Environments" / "Frames", 5, 3, [
         f"environment_atmosphere_{level}_{frame}" for level in range(1, 6) for frame in range(1, 4)
     ], False)
+    authored_environment_source = source.parent / "EnvironmentAtmosphere"
+    for level, slug in ((6, "campground"), (7, "neon-motel"), (8, "drive-in")):
+        crop_cells(
+            authored_environment_source / f"environment-atmosphere-{level:02d}-{slug}.png",
+            root / "Resources" / "Art" / "Environments" / "Frames",
+            1,
+            3,
+            [f"environment_atmosphere_{level}_{frame}" for frame in range(1, 4)],
+            False,
+        )
 
 
 def verify(root: Path) -> None:
