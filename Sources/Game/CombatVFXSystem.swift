@@ -247,6 +247,7 @@ final class CombatVFXSystem {
         case .propaneExplosion: SKColor(red: 0.78, green: 0.18, blue: 0.10, alpha: 1)
         case .airstrikeExplosion: .cyan
         case .greaseFireExplosion: SKColor(red: 0.92, green: 0.55, blue: 0.08, alpha: 1)
+        case .deliveryTruckImpact: SKColor(red: 0.56, green: 0.16, blue: 0.12, alpha: 1)
         // Brighter/more acidic than zombieSplatter's green to match the toxic ooze in the
         // vfx_volatile_burst art.
         case .volatileBurst: SKColor(red: 0.68, green: 0.95, blue: 0.22, alpha: 1)
@@ -254,7 +255,7 @@ final class CombatVFXSystem {
         }
         if !host.settings.reducedMotion {
             let debrisCount: Int = switch effect {
-            case .explosion, .grenadeExplosion, .propaneExplosion, .airstrikeExplosion, .volatileBurst: 14
+            case .explosion, .grenadeExplosion, .propaneExplosion, .airstrikeExplosion, .deliveryTruckImpact, .volatileBurst: 14
             case .greaseFireExplosion: 10
             default: 8
             }

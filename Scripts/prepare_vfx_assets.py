@@ -21,11 +21,12 @@ ASSETS = {
     "vfx_freezer_burst_source.png": ("vfx_freezer_burst.png", 768),
 }
 
-DEDICATED_SHEETS = {
-    "vfx_grenade_explosion_sheet.png": "vfx_grenade_explosion",
-    "vfx_propane_explosion_sheet.png": "vfx_propane_explosion",
-    "vfx_airstrike_explosion_sheet.png": "vfx_airstrike_explosion",
-    "vfx_grease_fire_explosion_sheet.png": "vfx_grease_fire_explosion",
+ANIMATED_SHEETS = {
+    Path("DedicatedExplosionSheets/vfx_grenade_explosion_sheet.png"): "vfx_grenade_explosion",
+    Path("DedicatedExplosionSheets/vfx_propane_explosion_sheet.png"): "vfx_propane_explosion",
+    Path("DedicatedExplosionSheets/vfx_airstrike_explosion_sheet.png"): "vfx_airstrike_explosion",
+    Path("DedicatedExplosionSheets/vfx_grease_fire_explosion_sheet.png"): "vfx_grease_fire_explosion",
+    Path("WeaponEffectSheets/vfx_delivery_truck_impact_sheet.png"): "vfx_delivery_truck_impact",
 }
 
 
@@ -52,14 +53,13 @@ def prepare_standalone(destination: Path) -> list[Path]:
     return written
 
 
-def prepare_dedicated_explosions(destination: Path) -> list[Path]:
+def prepare_animated_effects(destination: Path) -> list[Path]:
     frame_destination = destination / "Frames"
     frame_destination.mkdir(parents=True, exist_ok=True)
-    sheet_source = SOURCE / "DedicatedExplosionSheets"
     written: list[Path] = []
 
-    for sheet_name, effect_name in DEDICATED_SHEETS.items():
-        sheet = Image.open(sheet_source / sheet_name).convert("RGBA")
+    for relative_sheet, effect_name in ANIMATED_SHEETS.items():
+        sheet = Image.open(SOURCE / relative_sheet).convert("RGBA")
         cell_width = sheet.width // 2
         cell_height = sheet.height // 2
         frames: list[Image.Image] = []
@@ -91,7 +91,7 @@ def prepare_dedicated_explosions(destination: Path) -> list[Path]:
 
 def prepare(destination: Path) -> list[Path]:
     destination.mkdir(parents=True, exist_ok=True)
-    return prepare_standalone(destination) + prepare_dedicated_explosions(destination)
+    return prepare_standalone(destination) + prepare_animated_effects(destination)
 
 
 def verify() -> None:

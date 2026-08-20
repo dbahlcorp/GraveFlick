@@ -332,6 +332,7 @@ final class GameRulesTests: XCTestCase {
     func testCombatVFXHasCompleteAuthoredAssetSet() {
         XCTAssertTrue(CombatVFX.hasCompleteSet)
         XCTAssertTrue(CombatVFX.allCases.allSatisfy { $0.frames.count == 4 })
+        XCTAssertTrue(DeliveryTruckArt.hasCompleteSet)
     }
 
     func testProductionUIHasCompleteAuthoredAssetSet() {

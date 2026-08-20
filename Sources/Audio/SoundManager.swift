@@ -7,7 +7,7 @@ final class SoundManager {
     private enum MusicTrack { case menu, gameplay }
 
     enum Effect {
-        case grab, impact, crunch, defeat, dinerHit, weapon, special, bowlingRoll, bowlingImpact, waveClear, trap, pickup, victory, loss, ready, heartbeat, zombieVoice, bossRoar, armorBreak, explosion
+        case grab, impact, crunch, defeat, dinerHit, weapon, special, bowlingRoll, bowlingImpact, deliveryImpact, waveClear, trap, pickup, victory, loss, ready, heartbeat, zombieVoice, bossRoar, armorBreak, explosion
     }
 
     enum ZombieVoiceMoment { case spawn, hurt, attack, defeat }
@@ -225,7 +225,7 @@ final class SoundManager {
         case .sniper: LayeredSpec(low: 116, high: 3_100, duration: 0.22, volume: 0.27, noise: 0.52, sweep: 0.52, pulses: 1)
         case .greaseFire: LayeredSpec(low: 92, high: 760, duration: 0.64, volume: 0.18, noise: 0.64, sweep: 0.78, pulses: 1)
         case .transformer: LayeredSpec(low: 74, high: 2_500, duration: 0.62, volume: 0.19, noise: 0.22, sweep: 1.72, pulses: 5)
-        case .deliveryTruck: LayeredSpec(low: 92, high: 370, duration: 0.78, volume: 0.21, noise: 0.18, sweep: 0.88, pulses: 2)
+        case .deliveryTruck: LayeredSpec(low: 66, high: 620, duration: 1.08, volume: 0.23, noise: 0.26, sweep: 0.72, pulses: 3)
         case .meteor: LayeredSpec(low: 42, high: 920, duration: 0.86, volume: 0.25, noise: 0.55, sweep: 0.32, pulses: 1)
         }
         playLayered(spec)
@@ -373,6 +373,8 @@ final class SoundManager {
             buffer = tone(ToneSpec(frequency: 68, duration: 0.62, volume: 0.26, pitchSweep: 0.52, noiseMix: 0.48))
         case .armorBreak:
             buffer = layeredEffect(LayeredSpec(low: 94, high: 1_680, duration: 0.42, volume: 0.23, noise: 0.64, sweep: 0.48, pulses: 3))
+        case .deliveryImpact:
+            buffer = layeredEffect(LayeredSpec(low: 38, high: 1_180, duration: 0.46, volume: 0.30, noise: 0.72, sweep: 0.42, pulses: 2))
         case .explosion:
             buffer = layeredEffect(LayeredSpec(low: 44, high: 720, duration: 0.58, volume: 0.28, noise: 0.74, sweep: 0.34, pulses: 1))
         case .zombieVoice:
@@ -442,7 +444,7 @@ final class SoundManager {
         case .bowlingImpact: ToneSpec(frequency: 82, duration: 0.26, volume: 0.27, pitchSweep: 0.48, noiseMix: 0.50, detune: false)
         case .trap: ToneSpec(frequency: 320, duration: 0.18, volume: 0.13, pitchSweep: 0.85, noiseMix: 0.10)
         case .ready: ToneSpec(frequency: 880, duration: 0.05, volume: 0.09, pitchSweep: 1.15, noiseMix: 0, detune: false)
-        case .pickup, .victory, .loss, .heartbeat, .zombieVoice, .bossRoar, .armorBreak, .explosion, .bowlingRoll, .waveClear, .crunch: ToneSpec(frequency: 660, duration: 0.1, volume: 0.13)
+        case .pickup, .victory, .loss, .heartbeat, .zombieVoice, .bossRoar, .armorBreak, .explosion, .bowlingRoll, .deliveryImpact, .waveClear, .crunch: ToneSpec(frequency: 660, duration: 0.1, volume: 0.13)
         }
     }
 

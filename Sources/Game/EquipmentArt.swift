@@ -34,6 +34,18 @@ enum EquipmentArt: String, CaseIterable {
     }
 }
 
+enum DeliveryTruckArt {
+    static let driveFrames: [SKTexture] = (1...4).map { index in
+        let texture = SKTexture(imageNamed: "weapon_delivery_truck_drive_\(index)")
+        texture.filteringMode = .linear
+        return texture
+    }
+
+    static var hasCompleteSet: Bool {
+        driveFrames.count == 4 && driveFrames.allSatisfy { $0.size().width > 1 && $0.size().height > 1 }
+    }
+}
+
 extension WeaponKind {
     var equipmentArt: EquipmentArt {
         switch self {

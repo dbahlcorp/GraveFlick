@@ -233,8 +233,8 @@ final class WeaponSystem {
         case .tapOnNode:
             aimPreviewNode = spawnTransformerPole(host)
         case .dragRelease:
-            // Delivery Truck has no on-screen prop to drag — it starts off-screen and only
-            // the drag's origin/direction matter, so it gets a live line preview instead
+            // Delivery Truck has no on-screen prop to drag — it starts off-screen and uses the
+            // gesture's horizontal direction plus release height, so it gets a live lane preview
             // (drawn in updateAimPreview) rather than a ready sprite here.
             guard kind != .deliveryTruck, let node = makeDragReadyNode(for: kind, host) else { return }
             aimPreviewNode = node
@@ -353,7 +353,7 @@ final class WeaponSystem {
             break
         case .dragRelease:
             if weapon == .deliveryTruck {
-                updateDirectionalPreview(from: aimOrigin ?? location, to: location, color: .yellow)
+                updateDeliveryTruckPreview(from: aimOrigin ?? location, to: location)
             } else {
                 aimPreviewNode?.position = CGPoint(
                     x: min(host.size.width - 30, max(30, location.x)),
@@ -397,8 +397,7 @@ final class WeaponSystem {
         aimPreviewNode = line
     }
 
-    /// Live drag-direction indicator for gestures with no on-screen prop to drag (Delivery Truck,
-    /// Sniper's aim line).
+    /// Live drag-direction indicator for Sniper's aim line.
     private func updateDirectionalPreview(from origin: CGPoint, to location: CGPoint, color: SKColor) {
         guard let host else { return }
         aimPreviewNode?.removeFromParent()
@@ -412,6 +411,35 @@ final class WeaponSystem {
         line.zPosition = 133
         host.world.addChild(line)
         aimPreviewNode = line
+    }
+
+    /// Delivery Rush chooses its travel direction from the horizontal drag and its road lane from
+    /// the release height. A full-width preview communicates the actual sweep instead of implying
+    /// that the truck will follow the short gesture line literally.
+    private func updateDeliveryTruckPreview(from origin: CGPoint, to location: CGPoint) {
+        guard let host else { return }
+        aimPreviewNode?.removeFromParent()
+        let fromLeft = location.x >= origin.x
+        let laneProgress = min(1, max(0, (location.y - host.groundY) / max(1, host.size.height - host.groundY)))
+        let laneY = host.groundY + 52 + laneProgress * 20
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: fromLeft ? -24 : host.size.width + 24, y: laneY))
+        path.addLine(to: CGPoint(x: fromLeft ? host.size.width + 24 : -24, y: laneY))
+        let lane = SKShapeNode(path: path)
+        lane.strokeColor = SKColor(red: 0.98, green: 0.77, blue: 0.24, alpha: 0.42)
+        lane.lineWidth = 15
+        lane.glowWidth = host.settings.reducedMotion ? 0 : 5
+
+        let centerLine = SKShapeNode(path: path)
+        centerLine.strokeColor = SKColor(red: 0.34, green: 0.92, blue: 0.95, alpha: 0.78)
+        centerLine.lineWidth = 3
+
+        let preview = SKNode()
+        preview.zPosition = 133
+        preview.addChild(lane)
+        preview.addChild(centerLine)
+        host.world.addChild(preview)
+        aimPreviewNode = preview
     }
 
     func detonateIfHit(at location: CGPoint) -> Bool {
@@ -461,7 +489,9 @@ final class WeaponSystem {
         case .greaseFire: igniteGreaseFire(along: aim.resolvedPath ?? [CGPoint(x: host.size.width / 2, y: host.groundY + 20)])
         case .transformer: chainLightning()
         case .deliveryTruck:
-            if let flick = aim.resolvedFlick { launchDeliveryTruck(from: flick.origin, velocity: flick.velocity) }
+            if let flick = aim.resolvedFlick {
+                launchDeliveryTruck(from: flick.origin, toward: flick.releasePoint, velocity: flick.velocity)
+            }
         case .meteor: launchMeteor(target: aim.resolvedPoint ?? CGPoint(x: host.size.width / 2, y: host.groundY + 25))
         }
         host.notifyDelegate()
@@ -523,6 +553,24 @@ final class WeaponSystem {
         let tally = ((userData[key] as? Int) ?? 0) + 1
         userData[key] = tally
         return tally
+    }
+
+    /// Contact callbacks can repeat while a fast, non-colliding body overlaps a zombie. Recording
+    /// each victim on the short-lived truck node guarantees one damage event per pass and also
+    /// identifies the first collision, which earns the heavier audio/camera response.
+    func registerDeliveryTruckHit(on zombie: ZombieNode, truck node: SKNode?) -> (accepted: Bool, firstImpact: Bool) {
+        guard let node, node.name == WeaponKind.deliveryTruck.rawValue else { return (true, false) }
+        let userData = node.userData ?? {
+            let dictionary = NSMutableDictionary()
+            node.userData = dictionary
+            return dictionary
+        }()
+        let victimKey = "deliveryVictim_\(ObjectIdentifier(zombie).hashValue)"
+        guard userData[victimKey] == nil else { return (false, false) }
+        userData[victimKey] = true
+        let firstImpact = userData["deliveryHasImpacted"] == nil
+        userData["deliveryHasImpacted"] = true
+        return (true, firstImpact)
     }
 
     func tickCooldowns(_ deltaTime: TimeInterval) {
@@ -959,28 +1007,84 @@ final class WeaponSystem {
         radialFlash(at: origin, color: .cyan)
     }
 
-    /// The truck starts off-screen, so its swipe has no on-screen prop to drag (see
-    /// `spawnAimPreview`) — only where the swipe started (which edge to launch from) and its
-    /// direction (a little vertical drift) matter.
-    private func launchDeliveryTruck(from origin: CGPoint, velocity: CGVector) {
+    /// The horizontal flick selects the entry side and the release height selects a lane. The
+    /// truck holds that lane for a reliable sweep instead of drifting diagonally away from the
+    /// player's preview.
+    private func launchDeliveryTruck(from origin: CGPoint, toward releasePoint: CGPoint, velocity: CGVector) {
         guard let host else { return }
-        let fromLeft = origin.x < host.size.width / 2
-        let truck = SKSpriteNode(texture: WeaponKind.deliveryTruck.authoredTexture, size: CGSize(width: 190, height: 104))
+        let fallbackIntent = releasePoint.x - origin.x
+        let horizontalIntent = abs(velocity.dx) >= 80 ? velocity.dx : fallbackIntent
+        let fromLeft = horizontalIntent == 0 ? origin.x < host.size.width / 2 : horizontalIntent > 0
+        let laneProgress = min(1, max(0, (releasePoint.y - host.groundY) / max(1, host.size.height - host.groundY)))
+        let laneY = host.groundY + 52 + laneProgress * 20
+        let truck = SKSpriteNode(texture: DeliveryTruckArt.driveFrames[0], size: CGSize(width: 210, height: 118))
         truck.name = WeaponKind.deliveryTruck.rawValue
-        truck.position = CGPoint(x: fromLeft ? -120 : host.size.width + 120, y: host.groundY + 48)
-        truck.xScale = fromLeft ? 1 : -1
+        truck.position = CGPoint(x: fromLeft ? -130 : host.size.width + 130, y: laneY)
+        // Source art faces left; mirror only when the truck is driving right.
+        truck.xScale = fromLeft ? -1 : 1
         truck.zPosition = 35
-        truck.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: 175, height: 80))
+        truck.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: 190, height: 82))
         truck.physicsBody?.affectedByGravity = false
         truck.physicsBody?.categoryBitMask = PhysicsCategory.weapon
         truck.physicsBody?.collisionBitMask = PhysicsCategory.none
         truck.physicsBody?.contactTestBitMask = PhysicsCategory.zombie
         let travelDistance = host.size.width + 240
         let dx: CGFloat = (fromLeft ? 1 : -1) * travelDistance / 1.05
-        let dy = max(-70, min(70, velocity.dy * 0.12))
-        truck.physicsBody?.velocity = CGVector(dx: dx, dy: dy)
+        truck.physicsBody?.velocity = .zero
         host.world.addChild(truck)
-        truck.run(.sequence([.wait(forDuration: 1.3), .removeFromParent()]))
+        spawnDeliveryTruckHeadlightFlash(at: truck.position, direction: fromLeft ? 1 : -1)
+
+        if !host.settings.reducedMotion {
+            truck.run(.repeatForever(.animate(with: DeliveryTruckArt.driveFrames, timePerFrame: 0.085, resize: false, restore: false)), withKey: "driveCycle")
+            truck.run(.repeatForever(.sequence([
+                .run { [weak self, weak truck] in
+                    guard let truck else { return }
+                    self?.spawnDeliveryTruckTrail(behind: truck, direction: fromLeft ? 1 : -1)
+                },
+                .wait(forDuration: 0.075),
+            ])), withKey: "roadTrail")
+        }
+        truck.run(.sequence([
+            .wait(forDuration: 0.12),
+            .run { [weak truck] in truck?.physicsBody?.velocity = CGVector(dx: dx, dy: 0) },
+            .wait(forDuration: 1.05),
+            .fadeOut(withDuration: 0.15),
+            .removeFromParent(),
+        ]))
+    }
+
+    private func spawnDeliveryTruckHeadlightFlash(at point: CGPoint, direction: CGFloat) {
+        guard let host, host.settings.flashesEnabled else { return }
+        let flash = SKShapeNode(ellipseOf: CGSize(width: 92, height: 42))
+        flash.fillColor = SKColor(red: 0.40, green: 0.96, blue: 1, alpha: 0.34)
+        flash.strokeColor = SKColor(red: 0.72, green: 1, blue: 1, alpha: 0.78)
+        flash.glowWidth = host.settings.reducedMotion ? 0 : 8
+        flash.position = CGPoint(x: point.x + direction * 88, y: point.y + 8)
+        flash.zPosition = 34
+        host.world.addChild(flash)
+        flash.run(.sequence([.group([.scale(to: 1.8, duration: 0.14), .fadeOut(withDuration: 0.18)]), .removeFromParent()]))
+    }
+
+    private func spawnDeliveryTruckTrail(behind truck: SKNode, direction: CGFloat) {
+        guard let host else { return }
+        for offset in [CGFloat(-10), 8] {
+            let puff = SKShapeNode(circleOfRadius: CGFloat.random(in: 5...11))
+            puff.fillColor = Bool.random()
+                ? SKColor(red: 0.22, green: 0.26, blue: 0.27, alpha: 0.42)
+                : SKColor(red: 0.20, green: 0.78, blue: 0.82, alpha: 0.30)
+            puff.strokeColor = .clear
+            puff.position = CGPoint(x: truck.position.x - direction * 94, y: truck.position.y - 32 + offset)
+            puff.zPosition = 32
+            host.world.addChild(puff)
+            puff.run(.sequence([
+                .group([
+                    .moveBy(x: -direction * CGFloat.random(in: 20...42), y: CGFloat.random(in: 8...24), duration: 0.30),
+                    .scale(to: 1.8, duration: 0.30),
+                    .fadeOut(withDuration: 0.32),
+                ]),
+                .removeFromParent(),
+            ]))
+        }
     }
 
     private func launchMeteor(target rawTarget: CGPoint) {

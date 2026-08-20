@@ -294,15 +294,33 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         if let zombie = zombieBody(in: bodies), let weaponBody = bodies.first(where: { $0.categoryBitMask == PhysicsCategory.weapon }) {
             let weaponKind = weaponBody.node?.name.flatMap(WeaponKind.init(rawValue:))
+            if weaponKind == .deliveryTruck {
+                let registration = weaponSystem.registerDeliveryTruckHit(on: zombie, truck: weaponBody.node)
+                guard registration.accepted else { return }
+                let direction: CGFloat = weaponBody.velocity.dx >= 0 ? 1 : -1
+                playCombatVFX(.deliveryTruckImpact, at: contact.contactPoint, size: 154, direction: direction)
+                if registration.firstImpact {
+                    SoundManager.shared.play(.deliveryImpact)
+                    SoundManager.shared.duckMusic(strength: 0.38, duration: 0.44)
+                    shakeCamera(intensity: 0.72)
+                    hitStop(duration: 0.075, slowFactor: 0.16)
+                    runHaptic(.heavy)
+                }
+            }
             if let weaponKind, let sound = weaponSystem.impactSound(for: weaponKind) {
                 SoundManager.shared.play(sound)
             }
             playCombatVFX(.zombieSplatter, at: contact.contactPoint, size: 92, direction: zombie.approachesFromLeft ? -1 : 1)
-            let baseDamage: CGFloat = zombie.kind == .brute ? 1.8 : 4
+            let isDeliveryRush = weaponKind == .deliveryTruck
+            let baseDamage: CGFloat = isDeliveryRush ? 7 : (zombie.kind == .brute ? 1.8 : 4)
             // Frozen-solid zombies shatter for much higher weapon-contact damage (Flash Freezer),
             // and bypass the usual "survives its first ordinary hit" floor — that's the whole
             // point of brittleness — while a normal zombie's first hit is unaffected.
-            if zombie.damageAt(contact.contactPoint, amount: baseDamage * zombie.kind.weaponDamageMultiplier * zombie.frozenImpactDamageMultiplier, canOverkill: zombie.isFrozenSolid) {
+            if zombie.damageAt(
+                contact.contactPoint,
+                amount: baseDamage * zombie.kind.weaponDamageMultiplier * zombie.frozenImpactDamageMultiplier,
+                canOverkill: zombie.isFrozenSolid || isDeliveryRush
+            ) {
                 // Tracked on the projectile itself (see incrementKillTally) so a bowling ball that
                 // rolls through several zombies knows this is its 2nd+ kill — that's ZOMBIE BOWLING.
                 let tally = weaponSystem.incrementKillTally(on: weaponBody.node)
@@ -317,7 +335,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 // (not abs'd) dy so a weapon striking downward reads as a weaker pop than one
                 // striking upward, instead of both looking identical.
                 if zombie.canBeKnockedBack {
-                    knockback(zombie, impulse: CGVector(dx: weaponBody.velocity.dx * 0.32, dy: weaponBody.velocity.dy * 0.22 + 90))
+                    if isDeliveryRush {
+                        let direction: CGFloat = weaponBody.velocity.dx >= 0 ? 1 : -1
+                        knockback(zombie, impulse: CGVector(dx: direction * 360, dy: 165))
+                    } else {
+                        knockback(zombie, impulse: CGVector(dx: weaponBody.velocity.dx * 0.32, dy: weaponBody.velocity.dy * 0.22 + 90))
+                    }
                 }
             }
             return

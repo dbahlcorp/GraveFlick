@@ -8,6 +8,7 @@ enum CombatVFX: String, CaseIterable {
     case propaneExplosion = "vfx_propane_explosion"
     case airstrikeExplosion = "vfx_airstrike_explosion"
     case greaseFireExplosion = "vfx_grease_fire_explosion"
+    case deliveryTruckImpact = "vfx_delivery_truck_impact"
     case freezerBurst = "vfx_freezer_burst"
     /// The Volatile zombie's own death animation, distinct from every weapon-specific blast so its
     /// burst looks and feels like the creature itself popping.
