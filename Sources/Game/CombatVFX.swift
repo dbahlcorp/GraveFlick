@@ -4,10 +4,13 @@ enum CombatVFX: String, CaseIterable {
     case pavementImpact = "vfx_pavement_impact"
     case zombieSplatter = "vfx_zombie_splatter"
     case explosion = "vfx_explosion"
+    case grenadeExplosion = "vfx_grenade_explosion"
+    case propaneExplosion = "vfx_propane_explosion"
+    case airstrikeExplosion = "vfx_airstrike_explosion"
+    case greaseFireExplosion = "vfx_grease_fire_explosion"
     case freezerBurst = "vfx_freezer_burst"
-    /// The Volatile zombie's own death animation — distinct from the shared `.explosion` used by
-    /// grenades/propane tanks/airstrikes/grease fire, so its burst can look and feel like *it*
-    /// popping rather than a generic weapon fireball.
+    /// The Volatile zombie's own death animation, distinct from every weapon-specific blast so its
+    /// burst looks and feels like the creature itself popping.
     case volatileBurst = "vfx_volatile_burst"
 
     var texture: SKTexture {

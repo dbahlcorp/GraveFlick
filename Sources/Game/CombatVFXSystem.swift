@@ -243,14 +243,22 @@ final class CombatVFXSystem {
         let debrisColor: SKColor = switch effect {
         case .pavementImpact: .darkGray
         case .zombieSplatter: SKColor(red: 0.48, green: 0.76, blue: 0.16, alpha: 1)
-        case .explosion: .orange
-        // Brighter/more acidic than zombieSplatter's green — matches the toxic ooze in the
-        // vfx_volatile_burst art rather than reusing the shared explosion's plain orange.
+        case .explosion, .grenadeExplosion: .orange
+        case .propaneExplosion: SKColor(red: 0.78, green: 0.18, blue: 0.10, alpha: 1)
+        case .airstrikeExplosion: .cyan
+        case .greaseFireExplosion: SKColor(red: 0.92, green: 0.55, blue: 0.08, alpha: 1)
+        // Brighter/more acidic than zombieSplatter's green to match the toxic ooze in the
+        // vfx_volatile_burst art.
         case .volatileBurst: SKColor(red: 0.68, green: 0.95, blue: 0.22, alpha: 1)
         case .freezerBurst: .cyan
         }
         if !host.settings.reducedMotion {
-            playDirectionalDebris(at: point, color: debrisColor, direction: direction, count: effect == .explosion || effect == .volatileBurst ? 14 : 8)
+            let debrisCount: Int = switch effect {
+            case .explosion, .grenadeExplosion, .propaneExplosion, .airstrikeExplosion, .volatileBurst: 14
+            case .greaseFireExplosion: 10
+            default: 8
+            }
+            playDirectionalDebris(at: point, color: debrisColor, direction: direction, count: debrisCount)
         }
     }
 

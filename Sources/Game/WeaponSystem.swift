@@ -736,7 +736,7 @@ final class WeaponSystem {
             .wait(forDuration: 2.2),
             .run { [weak self, weak grenade] in
                 guard let self, let grenade else { return }
-                self.throwExplosive(at: grenade.position, radius: 150, damage: 4.5)
+                self.throwExplosive(at: grenade.position, radius: 150, damage: 4.5, effect: .grenadeExplosion)
                 grenade.removeFromParent()
             }
         ]))
@@ -779,7 +779,7 @@ final class WeaponSystem {
         let detonate: () -> Void = { [weak self, weak tank] in
             guard let self, let tank, !hasDetonated else { return }
             hasDetonated = true
-            self.throwExplosive(at: tank.position, radius: 175, damage: 5.5)
+            self.throwExplosive(at: tank.position, radius: 175, damage: 5.5, effect: .propaneExplosion)
             tank.removeFromParent()
         }
         detonatables[key] = Detonatable(node: tank, detonate: detonate)
@@ -805,7 +805,7 @@ final class WeaponSystem {
         return CGVector(dx: cos(angle) * magnitude, dy: sin(angle) * magnitude)
     }
 
-    private func throwExplosive(at point: CGPoint, radius rawRadius: CGFloat, damage: CGFloat, maxImpulse: CGFloat = 460, minImpulse: CGFloat = 140) {
+    private func throwExplosive(at point: CGPoint, radius rawRadius: CGFloat, damage: CGFloat, maxImpulse: CGFloat = 460, minImpulse: CGFloat = 140, effect: CombatVFX?) {
         guard let host else { return }
         let radius = rawRadius * host.perkSystem.explosiveWeaponRadiusBonus
         var killTally = 0
@@ -818,7 +818,9 @@ final class WeaponSystem {
             }
         }
         if killTally >= 10 { host.recordFeat("chain_reaction_10") }
-        host.playCombatVFX(.explosion, at: point, size: radius * 1.7, direction: 1, tint: nil)
+        if let effect {
+            host.playCombatVFX(effect, at: point, size: radius * 1.7, direction: 1, tint: nil)
+        }
         SoundManager.shared.play(.explosion)
         SoundManager.shared.duckMusic(strength: 0.48, duration: 0.42)
     }
@@ -933,7 +935,7 @@ final class WeaponSystem {
                 for zombie in host.activeZombies where !zombie.isDefeated && abs(zombie.position.x - center.x) < halfWidth {
                     if zombie.damage(0.85 * zombie.kind.weaponDamageMultiplier) { host.comboSystem.defeat(zombie, reason: .weapon, multiKillTally: 1, weaponKind: nil) }
                 }
-                host.playCombatVFX(.explosion, at: center, size: halfWidth * 2.1, direction: 1, tint: .orange)
+                host.playCombatVFX(.greaseFireExplosion, at: center, size: halfWidth * 2.1, direction: 1, tint: nil)
             }]))
         }
     }
@@ -1032,12 +1034,11 @@ final class WeaponSystem {
         playMeteorImpactArt(at: target)
         // Bigger radial impulse than a grenade/propane blast, matching the "enormous physics
         // impulse" this weapon is meant for.
-        throwExplosive(at: target, radius: 260, damage: 10, maxImpulse: 640, minImpulse: 220)
+        throwExplosive(at: target, radius: 260, damage: 10, maxImpulse: 640, minImpulse: 220, effect: nil)
     }
 
-    /// Bespoke impact-flash-to-smoke-cloud sequence layered on top of the generic radial
-    /// `.explosion` VFX every other explosive weapon shares — the meteor art was authored with
-    /// its own distinct look, so it gets its own frames instead of just the shared procedural one.
+    /// Bespoke impact-flash-to-smoke-cloud sequence. The radial damage call deliberately skips a
+    /// CombatVFX overlay so this authored Meteor art remains the complete visual identity.
     /// Both frames are composed with their ground contact at the very bottom of the canvas, so a
     /// bottom-center anchor keeps the explosion rooted at `target` instead of floating around it.
     private func playMeteorImpactArt(at target: CGPoint) {
@@ -1080,7 +1081,7 @@ final class WeaponSystem {
         for zombie in host.activeZombies where !zombie.isDefeated && abs(zombie.position.x - x) < host.size.width * 0.22 {
             if zombie.damage(5) { host.comboSystem.defeat(zombie, reason: .weapon, multiKillTally: 1, weaponKind: nil) }
         }
-        host.playCombatVFX(.explosion, at: point, size: 238, direction: indexDirection(for: x, host), tint: nil)
+        host.playCombatVFX(.airstrikeExplosion, at: point, size: 238, direction: indexDirection(for: x, host), tint: nil)
         SoundManager.shared.play(.explosion)
         SoundManager.shared.duckMusic(strength: 0.44, duration: 0.36)
         host.shakeCamera(intensity: 1.1)
