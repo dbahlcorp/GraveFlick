@@ -56,18 +56,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private var touchSamples: [ObjectIdentifier: [(point: CGPoint, time: TimeInterval)]] = [:]
     private var dualTouchBaseline: (distance: CGFloat, angle: CGFloat)?
 
-    // MARK: - Weapon aiming
-    private(set) var armedWeapon: WeaponKind?
-    private var aimTouchKey: ObjectIdentifier?
-    /// The touch-down point, held stable for the whole gesture — `aimSamples` is trimmed to a
-    /// short rolling window for velocity math, so it can't be trusted to still hold this by the
-    /// time a long drag ends.
-    private var aimOrigin: CGPoint?
-    private var aimSamples: [(point: CGPoint, time: TimeInterval)] = []
-    private var aimPathPoints: [CGPoint] = []
-    private var aimPreviewNode: SKNode?
-    private struct Detonatable { let node: SKNode; let detonate: () -> Void }
-    private var detonatables: [ObjectIdentifier: Detonatable] = [:]
     private var lastUpdateTime: TimeInterval = 0
     var elapsedTime: TimeInterval = 0
     private var movementAudioRemaining: TimeInterval = 0.7
@@ -81,10 +69,10 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     }
     var currentWaveTarget: Int { spawnDirector.currentWaveTarget }
     /// Kill scoring, combo tracking, and their on-kill feedback popups.
-    private let comboSystem = ComboSystem()
+    let comboSystem = ComboSystem()
     var specialCharge = 0.0
-    private var weaponCooldowns: [WeaponKind: TimeInterval] = [:]
-    private var trapCooldowns: [TrapKind: TimeInterval] = [:]
+    /// Weapon/trap arming, aim-gesture state, cooldowns, and every fire function.
+    private let weaponSystem = WeaponSystem()
     var gameOver = false
     private var didBuildWorld = false
     /// Roguelite perk state and mechanical bonuses — endless-only, in-memory for this run only
@@ -128,16 +116,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     // could otherwise exceed sandbox's old "effectively unlimited" value.
     var startingHealth: Int { level.isSandbox ? 9_999 : (level.modifier == .suddenDeath ? 1 : GameRules.startingHealth + progress.upgradeLevel(.reinforcedDiner) * GameRules.reinforcedDinerHealthPerLevel) }
     private var flickMultiplier: CGFloat { (1 + CGFloat(progress.upgradeLevel(.flickTraining)) * 0.10) * perkSystem.flickVelocityBonus }
-    private var rapidGearLevel: Int { progress.upgradeLevel(.rapidGear) }
-    private var groundY: CGFloat { max(70, size.height * 0.13) }
+    var rapidGearLevel: Int { progress.upgradeLevel(.rapidGear) }
+    var groundY: CGFloat { max(70, size.height * 0.13) }
     var houseFrame: CGRect {
         let width = min(310, size.width * 0.29)
         return CGRect(x: size.width * 0.5 - width * 0.5, y: groundY, width: width, height: min(280, size.height * 0.38))
     }
-    /// The point defender-fired shots (sniper tracer, scatterblast pellets) visually originate from.
-    private var defenderMuzzle: CGPoint {
-        CGPoint(x: houseFrame.midX + houseFrame.width * 0.18, y: groundY + houseFrame.height * 0.43)
-    }
+    /// True while `WaveModifier.graveTimeDisabled` is this wave's active modifier.
+    var isGraveTimeDisabled: Bool { spawnDirector.activeModifier == .graveTimeDisabled }
 
     init(level: GameLevel, progress: PlayerProgress, settings: GameSettings, size: CGSize) {
         self.level = level
@@ -159,6 +145,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         comboSystem.host = self
         spawnDirector.host = self
         bossDirector.host = self
+        weaponSystem.host = self
         backgroundColor = level.skyColor
         physicsWorld.gravity = CGVector(dx: 0, dy: level.modifier == .lowGravity ? -3.8 : -8.8)
         physicsWorld.contactDelegate = self
@@ -190,7 +177,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let deltaTime = lastUpdateTime == 0 ? 0 : min(1.0 / 20.0, currentTime - lastUpdateTime)
         lastUpdateTime = currentTime
         elapsedTime += deltaTime
-        tickCooldowns(deltaTime)
+        weaponSystem.tickCooldowns(deltaTime)
         movementAudioRemaining -= deltaTime
 
         if level.isSandbox {
@@ -240,53 +227,15 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         notifyDelegate()
     }
 
-    /// The gesture primitive a weapon's `touchesBegan`/`touchesMoved`/`touchesEnded` aim needs.
-    private enum WeaponAimGesture {
-        case tap
-        case tapOnNode(named: String)
-        case dragRelease
-        case dragAimReleaseLine
-        case pendulumDragRelease
-        case paintPath
-    }
-
-    /// The resolved aim, handed to a fire function once its gesture completes.
-    private enum WeaponAim {
-        case point(CGPoint)
-        case flick(origin: CGPoint, releasePoint: CGPoint, velocity: CGVector)
-        case line(origin: CGPoint, through: CGPoint)
-        case path([CGPoint])
-
-        var resolvedPoint: CGPoint? {
-            if case .point(let point) = self { return point }
-            return nil
-        }
-
-        var resolvedFlick: (origin: CGPoint, releasePoint: CGPoint, velocity: CGVector)? {
-            if case .flick(let origin, let releasePoint, let velocity) = self { return (origin, releasePoint, velocity) }
-            return nil
-        }
-
-        var resolvedLine: (origin: CGPoint, through: CGPoint)? {
-            if case .line(let origin, let through) = self { return (origin, through) }
-            return nil
-        }
-
-        var resolvedPath: [CGPoint]? {
-            if case .path(let points) = self { return points }
-            return nil
-        }
-    }
-
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard !isGameplayPaused, !gameOver else { return }
         for touch in touches {
             let key = ObjectIdentifier(touch)
             let location = touch.location(in: self)
-            if detonateIfHit(at: location) { continue }
-            if let armedWeapon {
-                guard aimTouchKey == nil else { continue }
-                beginAim(weapon: armedWeapon, key: key, location: location, timestamp: touch.timestamp)
+            if weaponSystem.detonateIfHit(at: location) { continue }
+            if let armedWeapon = weaponSystem.armedWeapon {
+                guard weaponSystem.aimTouchKey == nil else { continue }
+                weaponSystem.beginAim(weapon: armedWeapon, key: key, location: location, timestamp: touch.timestamp)
                 continue
             }
             if collectPickup(at: location) { continue }
@@ -306,8 +255,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
         for touch in touches {
             let key = ObjectIdentifier(touch)
-            if key == aimTouchKey {
-                updateAim(location: touch.location(in: self), timestamp: touch.timestamp)
+            if key == weaponSystem.aimTouchKey {
+                weaponSystem.updateAim(location: touch.location(in: self), timestamp: touch.timestamp)
                 continue
             }
             guard let zombie = selectedZombies[key] else { continue }
@@ -321,8 +270,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         for touch in touches {
-            if ObjectIdentifier(touch) == aimTouchKey {
-                endAim(location: touch.location(in: self), timestamp: touch.timestamp)
+            if ObjectIdentifier(touch) == weaponSystem.aimTouchKey {
+                weaponSystem.endAim(location: touch.location(in: self), timestamp: touch.timestamp)
             } else {
                 releaseZombie(touch)
             }
@@ -332,8 +281,8 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         for touch in touches {
-            if ObjectIdentifier(touch) == aimTouchKey {
-                cancelAim()
+            if ObjectIdentifier(touch) == weaponSystem.aimTouchKey {
+                weaponSystem.cancelAim()
             } else {
                 releaseZombie(touch)
             }
@@ -341,393 +290,21 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if selectedZombies.count < 2 { dualTouchBaseline = nil }
     }
 
-    /// Anvil/Meteor/Scatterblast are tap-targeted for good — the rest still resolve as `.tap`
-    /// (fire immediately on touch-down, ignoring where they're aimed) until their drag/paint/
-    /// pierce logic is built, one weapon at a time.
-    private func aimGesture(for kind: WeaponKind) -> WeaponAimGesture {
-        switch kind {
-        case .anvil, .meteor, .shotgun: .tap
-        case .bowlingBall, .grenade, .propaneTank, .deliveryTruck: .dragRelease
-        case .sniper: .dragAimReleaseLine
-        case .greaseFire, .airstrike: .paintPath
-        case .transformer: .tapOnNode(named: "transformerPole")
-        case .wreckingBall: .pendulumDragRelease
-        }
-    }
-
-    /// Arming replaces the old instant-fire `useWeapon`: tapping a weapon's icon readies it
-    /// instead of firing it immediately, and the actual shot comes from performing that weapon's
-    /// gesture on the battlefield (resolved in `beginAim`/`endAim`). Cooldown only starts on an
-    /// actual shot in `commitFire`, so arming or canceling costs nothing.
-    func armWeapon(_ kind: WeaponKind) {
-        guard !gameOver else { return }
-        if armedWeapon == kind {
-            cancelAim()
-            notifyDelegate()
-            return
-        }
-        guard (level.isSandbox || progress.isUnlocked(kind)), weaponCooldowns[kind, default: 0] <= 0 else { return }
-        cancelAim()
-        armedWeapon = kind
-        spawnAimPreview(for: kind)
-        notifyDelegate()
-    }
-
-    private func beginAim(weapon: WeaponKind, key: ObjectIdentifier, location: CGPoint, timestamp: TimeInterval) {
-        switch aimGesture(for: weapon) {
-        case .tap:
-            commitFire(weapon, aim: .point(location))
-        case .tapOnNode(let name):
-            let hitProp = nodes(at: location).contains { node in
-                var candidate: SKNode? = node
-                while let current = candidate {
-                    if current.name == name { return true }
-                    candidate = current.parent
-                }
-                return false
-            }
-            if hitProp { commitFire(weapon, aim: .point(location)) }
-        case .dragRelease, .dragAimReleaseLine, .pendulumDragRelease, .paintPath:
-            aimTouchKey = key
-            aimOrigin = location
-            aimSamples = [(location, timestamp)]
-            aimPathPoints = [location]
-            updateAimPreview(weapon: weapon, location: location)
-        }
-    }
-
-    private func updateAim(location: CGPoint, timestamp: TimeInterval) {
-        guard let armedWeapon else { return }
-        aimSamples.append((location, timestamp))
-        aimSamples = Array(aimSamples.suffix(8))
-        aimPathPoints.append(location)
-        updateAimPreview(weapon: armedWeapon, location: location)
-    }
-
-    private func endAim(location: CGPoint, timestamp: TimeInterval) {
-        aimTouchKey = nil
-        guard let weapon = armedWeapon else { return }
-        aimSamples.append((location, timestamp))
-        switch aimGesture(for: weapon) {
-        case .tap, .tapOnNode:
-            break // already resolved on touch-down in beginAim
-        case .dragRelease, .pendulumDragRelease:
-            var velocity = FlickMath.velocity(from: aimSamples)
-            // A too-weak release would otherwise just drop the object in place — match the floor
-            // ZombieNode.release already applies to a weak zombie flick.
-            if hypot(velocity.dx, velocity.dy) < 140 { velocity.dy = 180 }
-            commitFire(weapon, aim: .flick(origin: aimOrigin ?? location, releasePoint: location, velocity: velocity))
-        case .dragAimReleaseLine:
-            commitFire(weapon, aim: .line(origin: defenderMuzzle, through: location))
-        case .paintPath:
-            commitFire(weapon, aim: .path(aimPathPoints))
-        }
-    }
-
-    private func cancelAim() {
-        armedWeapon = nil
-        aimTouchKey = nil
-        aimOrigin = nil
-        aimSamples.removeAll()
-        aimPathPoints.removeAll()
-        aimPreviewNode?.removeFromParent()
-        aimPreviewNode = nil
-    }
+    /// Called by the SwiftUI weapon rack when the player taps a weapon icon.
+    func armWeapon(_ kind: WeaponKind) { weaponSystem.armWeapon(kind) }
 
     /// Public entry point for cleanup callers outside the touch-handling code (pausing,
-    /// backgrounding, level finish) — a plain `cancelAim()` call skips the HUD refresh those
-    /// sites need, since they're not already about to call `notifyDelegate()` themselves.
-    func cancelArmedWeapon() {
-        guard armedWeapon != nil else { return }
-        cancelAim()
-        notifyDelegate()
-    }
+    /// backgrounding, level finish).
+    func cancelArmedWeapon() { weaponSystem.cancelArmedWeapon() }
 
-    /// Hands the preview node off to the fire function (which turns it into the live projectile)
-    /// without removing it from the scene, unlike `cancelAim` — an explicit cancel discards the
-    /// preview, but a completed shot keeps it flying.
-    @discardableResult
-    private func releaseAimPreview() -> SKNode? {
-        let node = aimPreviewNode
-        armedWeapon = nil
-        aimTouchKey = nil
-        aimOrigin = nil
-        aimSamples.removeAll()
-        aimPathPoints.removeAll()
-        aimPreviewNode = nil
-        return node
-    }
+    func useTrap(_ kind: TrapKind) { weaponSystem.useTrap(kind) }
 
-    /// Placeholder until each weapon's gesture is converted (see `aimGesture(for:)`) — nothing to
-    /// preview for a `.tap`-resolved weapon since it fires on touch-down with no drag phase.
-    private func spawnAimPreview(for kind: WeaponKind) {
-        switch aimGesture(for: kind) {
-        case .tap:
-            break
-        case .tapOnNode:
-            aimPreviewNode = spawnTransformerPole()
-        case .dragRelease:
-            // Delivery Truck has no on-screen prop to drag — it starts off-screen and only
-            // the drag's origin/direction matter, so it gets a live line preview instead
-            // (drawn in updateAimPreview) rather than a ready sprite here.
-            guard kind != .deliveryTruck, let node = makeDragReadyNode(for: kind) else { return }
-            aimPreviewNode = node
-            world.addChild(node)
-        case .pendulumDragRelease:
-            guard let node = makeDragReadyNode(for: kind) else { return }
-            aimPreviewNode = node
-            world.addChild(node)
-        case .dragAimReleaseLine, .paintPath:
-            break
-        }
-    }
+    func useSpecial() { weaponSystem.useSpecial() }
 
-    private var transformerPolePosition: CGPoint {
-        CGPoint(x: houseFrame.minX - 90, y: groundY + 70)
-    }
-
-    /// A static pivot anchored near the top of the screen with the ball hanging below it at rest
-    /// — the joint (built fresh in `swingWreckingBall` at release, not here) treats this as its
-    /// rest arm length, so the ball's dragged-to position at release is what the pendulum swings
-    /// from.
-    private var wreckingBallPivotPosition: CGPoint {
-        CGPoint(x: size.width * 0.5, y: size.height * 0.92)
-    }
-    private var wreckingBallArmLength: CGFloat {
-        min(260, size.height * 0.42)
-    }
-
-    /// The tappable prop Transformer arms — expires after 6s if untapped so the player isn't
-    /// stuck armed forever without spending the weapon's cooldown.
-    private func spawnTransformerPole() -> SKNode {
-        let pole = SKSpriteNode(texture: WeaponKind.transformer.authoredTexture, size: CGSize(width: 60, height: 108))
-        pole.name = "transformerPole"
-        pole.position = transformerPolePosition
-        pole.zPosition = 34
-        world.addChild(pole)
-        if settings.reducedMotion {
-            pole.setScale(1)
-        } else {
-            pole.setScale(0.2)
-            pole.run(.sequence([
-                .scale(to: 1.12, duration: 0.14),
-                .scale(to: 1, duration: 0.10)
-            ]))
-            pole.run(.repeatForever(.sequence([
-                .fadeAlpha(to: 0.55, duration: 0.35),
-                .fadeAlpha(to: 1, duration: 0.35)
-            ])), withKey: "poleGlow")
-        }
-        pole.run(.sequence([
-            .wait(forDuration: 6),
-            .run { [weak self, weak pole] in
-                guard let self, let pole else { return }
-                self.cancelTransformerPoleIfStillArmed(pole)
-            }
-        ]))
-        return pole
-    }
-
-    private func cancelTransformerPoleIfStillArmed(_ pole: SKNode) {
-        guard armedWeapon == .transformer, aimPreviewNode === pole else { return }
-        cancelAim()
-        notifyDelegate()
-    }
-
-    private func weaponReadySpot(for kind: WeaponKind) -> CGPoint {
-        switch kind {
-        case .grenade:
-            // Close to the diner — this is a hand-thrown weapon, it should visibly come from
-            // the player's position at the window, not materialize at mid-field.
-            return CGPoint(x: houseFrame.midX + houseFrame.width * 0.1, y: groundY + houseFrame.height * 0.3)
-        default:
-            return CGPoint(x: size.width * 0.5, y: groundY + 40)
-        }
-    }
-
-    /// The weapon-prop sprite a `dragRelease` weapon presents at its ready spot when armed —
-    /// physics-less until `commitFire` hands it to that weapon's fire function.
-    private func makeDragReadyNode(for kind: WeaponKind) -> SKSpriteNode? {
-        switch kind {
-        case .bowlingBall:
-            let ball = SKSpriteNode(texture: EquipmentArt.bowlingBall.texture)
-            ball.size = EquipmentArt.bowlingBall.fittedSize(inside: CGSize(width: 67, height: 67))
-            ball.name = WeaponKind.bowlingBall.rawValue
-            ball.position = weaponReadySpot(for: kind)
-            ball.zPosition = 30
-            return ball
-        case .grenade:
-            let grenade = SKSpriteNode(texture: WeaponKind.grenade.authoredTexture, size: CGSize(width: 44, height: 58))
-            grenade.name = WeaponKind.grenade.rawValue
-            grenade.position = weaponReadySpot(for: kind)
-            grenade.zPosition = 30
-            return grenade
-        case .propaneTank:
-            let tank = SKSpriteNode(texture: WeaponKind.propaneTank.authoredTexture, size: CGSize(width: 86, height: 58))
-            tank.name = WeaponKind.propaneTank.rawValue
-            tank.position = weaponReadySpot(for: kind)
-            tank.zPosition = 30
-            return tank
-        case .wreckingBall:
-            let ball = SKSpriteNode(texture: WeaponKind.wreckingBall.authoredTexture, size: CGSize(width: 118, height: 118))
-            ball.name = WeaponKind.wreckingBall.rawValue
-            ball.position = CGPoint(x: wreckingBallPivotPosition.x, y: wreckingBallPivotPosition.y - wreckingBallArmLength)
-            ball.zPosition = 30
-            return ball
-        default:
-            return nil
-        }
-    }
-
-    private func updateAimPreview(weapon: WeaponKind, location: CGPoint) {
-        switch aimGesture(for: weapon) {
-        case .tap, .tapOnNode:
-            break
-        case .dragRelease:
-            if weapon == .deliveryTruck {
-                updateDirectionalPreview(from: aimOrigin ?? location, to: location, color: .yellow)
-            } else {
-                aimPreviewNode?.position = CGPoint(
-                    x: min(size.width - 30, max(30, location.x)),
-                    y: min(size.height - 30, max(groundY + 20, location.y))
-                )
-            }
-        case .dragAimReleaseLine:
-            updateDirectionalPreview(from: defenderMuzzle, to: location, color: SKColor(red: 1, green: 0.82, blue: 0.28, alpha: 0.7))
-        case .paintPath:
-            updatePaintPathPreview(weapon: weapon)
-        case .pendulumDragRelease:
-            // Cosmetic-only clamp while dragging — the ball has no physics body yet (added fresh
-            // in swingWreckingBall at release), so nothing here fights a physics constraint.
-            let pivot = wreckingBallPivotPosition
-            let dx = location.x - pivot.x
-            let dy = location.y - pivot.y
-            let distance = max(1, hypot(dx, dy))
-            let clamped = min(wreckingBallArmLength, distance)
-            let angle = atan2(dy, dx)
-            aimPreviewNode?.position = CGPoint(x: pivot.x + cos(angle) * clamped, y: pivot.y + sin(angle) * clamped)
-        }
-    }
-
-    /// Live polyline reading back the zone/path the player is painting, tinted per-weapon.
-    private func updatePaintPathPreview(weapon: WeaponKind) {
-        aimPreviewNode?.removeFromParent()
-        guard aimPathPoints.count > 1 else { return }
-        let path = CGMutablePath()
-        path.move(to: aimPathPoints[0])
-        for point in aimPathPoints.dropFirst() { path.addLine(to: point) }
-        let line = SKShapeNode(path: path)
-        line.strokeColor = weapon == .greaseFire
-            ? SKColor(red: 1, green: 0.55, blue: 0.12, alpha: 0.75)
-            : SKColor(red: 1, green: 0.82, blue: 0.30, alpha: 0.7)
-        line.lineWidth = 6
-        line.glowWidth = settings.reducedMotion ? 0 : 4
-        line.zPosition = 133
-        world.addChild(line)
-        aimPreviewNode = line
-    }
-
-    /// Live drag-direction indicator for gestures with no on-screen prop to drag (Delivery Truck,
-    /// Sniper's aim line).
-    private func updateDirectionalPreview(from origin: CGPoint, to location: CGPoint, color: SKColor) {
-        aimPreviewNode?.removeFromParent()
-        let path = CGMutablePath()
-        path.move(to: origin)
-        path.addLine(to: location)
-        let line = SKShapeNode(path: path)
-        line.strokeColor = color
-        line.lineWidth = 3
-        line.glowWidth = settings.reducedMotion ? 0 : 3
-        line.zPosition = 133
-        world.addChild(line)
-        aimPreviewNode = line
-    }
-
-    private func detonateIfHit(at location: CGPoint) -> Bool {
-        for node in nodes(at: location) {
-            var candidate: SKNode? = node
-            while let current = candidate {
-                let key = ObjectIdentifier(current)
-                if let detonatable = detonatables[key] {
-                    detonatables.removeValue(forKey: key)
-                    detonatable.detonate()
-                    return true
-                }
-                candidate = current.parent
-            }
-        }
-        return false
-    }
-
-    /// Weapons whose fire function takes ownership of the preview node, turning it into the live
-    /// projectile — every other weapon's "preview" is purely cosmetic (a tracer/paint line) and
-    /// must be discarded here, or it would linger in the scene after the shot resolves.
-    private static let weaponsThatKeepPreview: Set<WeaponKind> = [.bowlingBall, .grenade, .propaneTank, .wreckingBall]
-
-    private func commitFire(_ kind: WeaponKind, aim: WeaponAim) {
-        let preview = releaseAimPreview()
-        if !Self.weaponsThatKeepPreview.contains(kind) { preview?.removeFromParent() }
-        let weaponLevel = progress.upgradeLevel(kind)
-        weaponCooldowns[kind] = level.isSandbox ? 0 : GameRules.cooldown(base: kind.cooldown, rapidGearLevel: rapidGearLevel + weaponLevel)
-        SoundManager.shared.playWeapon(kind)
-        if kind == .shotgun || kind == .sniper { dinerNode?.fireDefender() }
-        switch kind {
-        case .bowlingBall:
-            if let flick = aim.resolvedFlick { launchBowlingBall(preview: preview, velocity: flick.velocity) }
-        case .shotgun: fireScatterblast(toward: aim.resolvedPoint ?? CGPoint(x: size.width / 2, y: groundY + 110))
-        case .airstrike: launchAirstrike(along: aim.resolvedPath ?? [CGPoint(x: size.width / 2, y: groundY + 54)])
-        case .anvil: dropAnvils(at: aim.resolvedPoint ?? CGPoint(x: size.width / 2, y: 0))
-        case .grenade:
-            if let flick = aim.resolvedFlick { throwGrenade(preview: preview, velocity: flick.velocity) }
-        case .propaneTank:
-            if let flick = aim.resolvedFlick { launchPropaneTank(preview: preview, velocity: flick.velocity) }
-        case .wreckingBall:
-            if let flick = aim.resolvedFlick { swingWreckingBall(preview: preview, velocity: flick.velocity) }
-        case .sniper:
-            if let line = aim.resolvedLine { fireSniper(through: line.through) }
-        case .greaseFire: igniteGreaseFire(along: aim.resolvedPath ?? [CGPoint(x: size.width / 2, y: groundY + 20)])
-        case .transformer: chainLightning()
-        case .deliveryTruck:
-            if let flick = aim.resolvedFlick { launchDeliveryTruck(from: flick.origin, velocity: flick.velocity) }
-        case .meteor: launchMeteor(target: aim.resolvedPoint ?? CGPoint(x: size.width / 2, y: groundY + 25))
-        }
-        notifyDelegate()
-    }
-
-    func useTrap(_ kind: TrapKind) {
-        guard progress.isUnlocked(kind), trapCooldowns[kind, default: 0] <= 0, !gameOver else { return }
-        trapCooldowns[kind] = GameRules.cooldown(base: kind.cooldown, rapidGearLevel: rapidGearLevel)
-        SoundManager.shared.playTrap(kind)
-        switch kind {
-        case .spikeStrip: placeSpikeStrips()
-        case .freezer: triggerFreezer()
-        }
-        notifyDelegate()
-    }
-
-    func useSpecial() {
-        guard specialCharge >= 1, !gameOver, spawnDirector.activeModifier != .graveTimeDisabled else { return }
-        specialCharge = 0
-        SoundManager.shared.play(.special)
-        SoundManager.shared.duckMusic(strength: 0.34, duration: 0.55)
-        announce(text: "GRAVE TIME", color: .cyan)
-        let slowDuration = 8 + perkSystem.graveTimeBonusDuration
-        for zombie in activeZombies {
-            zombie.slow(for: slowDuration, reducedMotion: settings.reducedMotion)
-            zombie.physicsBody?.velocity.dx *= 0.35
-            zombie.physicsBody?.velocity.dy *= 0.35
-        }
-        if !settings.reducedMotion {
-            let wash = SKShapeNode(rectOf: size)
-            wash.fillColor = .cyan.withAlphaComponent(0.18)
-            wash.strokeColor = .clear
-            wash.position = CGPoint(x: size.width / 2, y: size.height / 2)
-            wash.zPosition = 180
-            world.addChild(wash)
-            wash.run(.sequence([.fadeOut(withDuration: 0.8), .removeFromParent()]))
-        }
-        notifyDelegate()
-    }
+    func upgradeLevel(_ kind: WeaponKind) -> Int { progress.upgradeLevel(kind) }
+    func isUnlocked(_ weapon: WeaponKind) -> Bool { progress.isUnlocked(weapon) }
+    func isUnlocked(_ trap: TrapKind) -> Bool { progress.isUnlocked(trap) }
+    func fireDefender() { dinerNode?.fireDefender() }
 
     /// Called by the SwiftUI perk picker (via GameSessionModel.choosePerk) when the player taps
     /// one of the three offered cards.
@@ -766,7 +343,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         if let zombie = zombieBody(in: bodies), let weaponBody = bodies.first(where: { $0.categoryBitMask == PhysicsCategory.weapon }) {
             let weaponKind = weaponBody.node?.name.flatMap(WeaponKind.init(rawValue:))
-            if let weaponKind, let sound = impactSound(for: weaponKind) {
+            if let weaponKind, let sound = weaponSystem.impactSound(for: weaponKind) {
                 SoundManager.shared.play(sound)
             }
             playCombatVFX(.zombieSplatter, at: contact.contactPoint, size: 92, direction: zombie.approachesFromLeft ? -1 : 1)
@@ -777,7 +354,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if zombie.damageAt(contact.contactPoint, amount: baseDamage * zombie.kind.weaponDamageMultiplier * zombie.frozenImpactDamageMultiplier, canOverkill: zombie.isFrozenSolid) {
                 // Tracked on the projectile itself (see incrementKillTally) so a bowling ball that
                 // rolls through several zombies knows this is its 2nd+ kill — that's ZOMBIE BOWLING.
-                let tally = incrementKillTally(on: weaponBody.node)
+                let tally = weaponSystem.incrementKillTally(on: weaponBody.node)
                 if weaponKind == .bowlingBall, tally >= 3 { recordFeat("bowling_triple") }
                 comboSystem.defeat(zombie, reason: .weapon, multiKillTally: tally, weaponKind: weaponKind)
             } else {
@@ -849,13 +426,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let sign: CGFloat = dx == 0 ? (zombie.approachesFromLeft ? -1 : 1) : (dx > 0 ? 1 : -1)
         let power = min(300, max(90, magnitude * 3.2))
         knockback(zombie, impulse: CGVector(dx: sign * power, dy: power * 0.6))
-    }
-
-    /// Central place for weapon-specific impact sounds, keyed by the WeaponKind name every weapon
-    /// node is now tagged with, so a new weapon needing a unique impact sound is one case here
-    /// instead of another hardcoded node-name branch in didBegin.
-    private func impactSound(for weaponKind: WeaponKind) -> SoundManager.Effect? {
-        weaponKind == .bowlingBall ? .bowlingImpact : nil
     }
 
     private func resolveImpact(on zombie: ZombieNode, damage rawDamage: CGFloat) {
@@ -1077,733 +647,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         return Float(max(-0.9, min(0.9, normalized)))
     }
 
-    func explodeVolatile(at point: CGPoint) {
-        let radius: CGFloat = 170 * perkSystem.volatileBlastRadiusBonus
-        let nearby = activeZombies.filter {
-            !$0.isDefeated && hypot($0.position.x - point.x, $0.position.y - point.y) < radius
-        }
-        var killTally = 0
-        for zombie in nearby {
-            if zombie.damage(1.6) {
-                killTally += 1
-                comboSystem.defeat(zombie, reason: .explosion, multiKillTally: killTally)
-            } else {
-                zombie.launch(with: radialImpulse(from: point, to: zombie.position, radius: radius, maxImpulse: 380, minImpulse: 140))
-            }
-        }
-        if killTally >= 10 { recordFeat("chain_reaction_10") }
-        playCombatVFX(.volatileBurst, at: point, size: 270, direction: 1)
-        SoundManager.shared.play(.explosion)
-        SoundManager.shared.duckMusic(strength: 0.48, duration: 0.42)
-        shakeCamera(intensity: 1.2)
-    }
-
-    /// `preview` is the ready sprite the player dragged (see `makeDragReadyNode`); falls back to
-    /// spawning fresh only if a shot somehow arrives with no preview (defensive, shouldn't happen).
-    private func launchBowlingBall(preview: SKNode?, velocity: CGVector) {
-        let ball = (preview as? SKSpriteNode) ?? {
-            let fallback = SKSpriteNode(texture: EquipmentArt.bowlingBall.texture)
-            fallback.size = EquipmentArt.bowlingBall.fittedSize(inside: CGSize(width: 67, height: 67))
-            fallback.position = CGPoint(x: size.width * 0.5, y: groundY + 34)
-            world.addChild(fallback)
-            return fallback
-        }()
-        ball.name = WeaponKind.bowlingBall.rawValue
-        ball.zPosition = 30
-        // Matches the ~82% shrink, then a further ~55% shrink, applied to ZombieKind.size — a
-        // full-size ball rolling through the now-smaller zombies would be relatively chunkier
-        // than intended, hitting more of each body than the original size ratio called for.
-        ball.physicsBody = SKPhysicsBody(circleOfRadius: 12)
-        ball.physicsBody?.mass = 3.5
-        // GUTTER? NEVER HEARD OF HER: bouncing off the boundary (instead of just rolling past it
-        // and despawning) turns one throw into several passes through the crowd, so it also gets a
-        // livelier bounce and a longer lifetime to actually use it.
-        ball.physicsBody?.restitution = perkSystem.hasBowlingRicochet ? 0.62 : 0.32
-        ball.physicsBody?.friction = 0.7
-        ball.physicsBody?.categoryBitMask = PhysicsCategory.weapon
-        ball.physicsBody?.collisionBitMask = PhysicsCategory.zombie | PhysicsCategory.ground | (perkSystem.hasBowlingRicochet ? PhysicsCategory.boundary : PhysicsCategory.none)
-        ball.physicsBody?.contactTestBitMask = PhysicsCategory.zombie
-        ball.physicsBody?.velocity = velocity
-        SoundManager.shared.play(.bowlingRoll)
-        if !settings.reducedMotion {
-            ball.run(.repeatForever(.rotate(byAngle: velocity.dx < 0 ? .pi * 2 : -.pi * 2, duration: 0.38)), withKey: "roll")
-        }
-        ball.run(.sequence([.wait(forDuration: perkSystem.hasBowlingRicochet ? 9 : 5), .removeFromParent()]))
-    }
-
-    /// Half-angle of the scatterblast cone, in radians (~22°).
-    private let scatterblastHalfAngle: CGFloat = 0.38
-    private var scatterblastRange: CGFloat { size.width * 0.62 }
-
-    /// Knockback follows the real direction to each zombie (not a flattened left/right), and both
-    /// damage and impulse taper with distance from the muzzle: a point-blank hit sends a zombie
-    /// flying, a zombie at the edge of the cone's range barely staggers.
-    private func fireScatterblast(toward aimPoint: CGPoint) {
-        let origin = defenderMuzzle
-        let aimAngle = atan2(aimPoint.y - origin.y, aimPoint.x - origin.x)
-        let range = scatterblastRange
-        let zombies = activeZombies.filter { !$0.isDefeated }
-        for zombie in zombies {
-            let dx = zombie.position.x - origin.x
-            let dy = zombie.position.y - origin.y
-            let distance = max(1, hypot(dx, dy))
-            let angleToZombie = atan2(dy, dx)
-            guard abs(shortestAngleDelta(from: aimAngle, to: angleToZombie)) <= scatterblastHalfAngle else { continue }
-
-            let proximity = max(0, 1 - distance / range)
-            let damage = (1.0 + proximity * 3.4) * zombie.kind.weaponDamageMultiplier
-            let impulse = radialImpulse(from: origin, to: zombie.position, radius: range, maxImpulse: 760, minImpulse: 210)
-            zombie.launch(with: impulse)
-            if zombie.damage(damage) { comboSystem.defeat(zombie, reason: .weapon) }
-        }
-        fireBuckshotSpread(from: origin, angle: aimAngle)
-        radialFlash(at: origin, color: .yellow)
-        playDirectionalDebris(at: origin, color: .orange, direction: cos(aimAngle) < 0 ? -1 : 1, count: 10)
-        shakeCamera(intensity: 0.8)
-    }
-
-    private func shortestAngleDelta(from a: CGFloat, to b: CGFloat) -> CGFloat {
-        var delta = (b - a).truncatingRemainder(dividingBy: 2 * .pi)
-        if delta > .pi { delta -= 2 * .pi }
-        if delta < -.pi { delta += 2 * .pi }
-        return delta
-    }
-
-    /// Authored pellet-cluster sprite reading as a shotgun blast out of the defender's window,
-    /// rotated to the aimed direction and shot outward along it so the blast itself is legible
-    /// instead of looking like an unexplained shockwave.
-    private func fireBuckshotSpread(from origin: CGPoint, angle: CGFloat) {
-        guard settings.flashesEnabled else { return }
-        let range = scatterblastRange
-        let texture = SKTexture(imageNamed: "weapon_scatterblast_pellets")
-        let aspect = texture.size().height / max(1, texture.size().width)
-        // Scales with `scatterblastRange` (itself screen-width-based) instead of a fixed size, so
-        // the blast reads proportionally the same on a small phone and a wide iPad rather than
-        // looking oversized or tiny relative to the cone it's actually covering.
-        let width = min(220, max(90, range * 0.3))
-        let pellets = SKSpriteNode(texture: texture, size: CGSize(width: width, height: width * aspect))
-        pellets.position = CGPoint(x: origin.x + cos(angle) * range * 0.3, y: origin.y + sin(angle) * range * 0.3)
-        pellets.zRotation = angle
-        pellets.zPosition = 133
-        world.addChild(pellets)
-        let travel = CGVector(dx: cos(angle) * range * 0.62, dy: sin(angle) * range * 0.62)
-        pellets.run(.sequence([
-            .group([.move(by: travel, duration: settings.reducedMotion ? 0.08 : 0.14), .fadeOut(withDuration: settings.reducedMotion ? 0.08 : 0.14)]),
-            .removeFromParent()
-        ]))
-    }
-
-    /// Impact count/spacing scale with the painted swipe's length (2–5 impacts) instead of the
-    /// old fixed 3-point pattern.
-    private func launchAirstrike(along path: [CGPoint]) {
-        let xs = path.map(\.x)
-        let minX = xs.min() ?? size.width * 0.18
-        let maxX = xs.max() ?? size.width * 0.82
-        let span = maxX - minX
-        let impactCount = span < 40 ? 2 : min(5, max(2, Int(span / 90) + 2))
-        let targets: [CGFloat] = (0..<impactCount).map { index in
-            impactCount == 1 ? (minX + maxX) / 2 : minX + span * CGFloat(index) / CGFloat(impactCount - 1)
-        }
-
-        let beacon = SKSpriteNode(texture: EquipmentArt.airstrikeBeacon.actionFrames[0], size: CGSize(width: 108, height: 108))
-        beacon.position = CGPoint(x: (minX + maxX) / 2, y: groundY + 54)
-        beacon.zPosition = 32
-        beacon.setScale(0.05)
-        world.addChild(beacon)
-        if settings.reducedMotion { beacon.texture = EquipmentArt.airstrikeBeacon.actionFrames[1] }
-        else { beacon.run(.repeatForever(.animate(with: EquipmentArt.airstrikeBeacon.actionFrames, timePerFrame: 0.16, resize: false, restore: true)), withKey: "artFrames") }
-        if settings.reducedMotion {
-            beacon.setScale(1)
-            beacon.run(.sequence([.wait(forDuration: 1.2), .fadeOut(withDuration: 0.12), .removeFromParent()]))
-        } else {
-            let pulse = SKAction.sequence([.fadeAlpha(to: 0.38, duration: 0.14), .fadeAlpha(to: 1, duration: 0.14)])
-            beacon.run(.sequence([
-                .scale(to: 1, duration: 0.18),
-                .repeat(pulse, count: 4),
-                .wait(forDuration: 0.45),
-                .fadeOut(withDuration: 0.2),
-                .removeFromParent()
-            ]))
-        }
-        for (index, x) in targets.enumerated() {
-            world.run(.sequence([
-                .wait(forDuration: Double(index) * 0.24),
-                .run { [weak self] in self?.airstrikeImpact(x: x) }
-            ]))
-        }
-    }
-
-    /// A single tap-targeted anvil, replacing the old auto-drop-on-up-to-3-nearest-zombies — a
-    /// deliberate trade of total coverage for precision, since the player now aims it themselves.
-    private func dropAnvils(at target: CGPoint) {
-        let anvil = SKSpriteNode(texture: WeaponKind.anvil.authoredTexture, size: CGSize(width: 82, height: 68))
-        anvil.name = WeaponKind.anvil.rawValue
-        anvil.position = CGPoint(x: target.x, y: size.height + 45)
-        anvil.zPosition = 40
-        anvil.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: 58, height: 42))
-        anvil.physicsBody?.mass = 5
-        anvil.physicsBody?.categoryBitMask = PhysicsCategory.weapon
-        anvil.physicsBody?.collisionBitMask = PhysicsCategory.zombie | PhysicsCategory.ground
-        anvil.physicsBody?.contactTestBitMask = PhysicsCategory.zombie
-        world.addChild(anvil)
-        anvil.run(.sequence([.wait(forDuration: 4), .removeFromParent()]))
-    }
-
-    /// Drag-thrown, physics-bounced grenade with a fixed fuse — explodes wherever it's landed
-    /// ~2.2s after release, via the same point-based `throwExplosive` propane/meteor use.
-    private func throwGrenade(preview: SKNode?, velocity: CGVector) {
-        let grenade = (preview as? SKSpriteNode) ?? {
-            let fallback = SKSpriteNode(texture: WeaponKind.grenade.authoredTexture, size: CGSize(width: 44, height: 58))
-            fallback.position = weaponReadySpot(for: .grenade)
-            world.addChild(fallback)
-            return fallback
-        }()
-        grenade.name = WeaponKind.grenade.rawValue
-        grenade.zPosition = 30
-        grenade.physicsBody = SKPhysicsBody(circleOfRadius: 20)
-        grenade.physicsBody?.mass = 1.4
-        grenade.physicsBody?.restitution = 0.55
-        grenade.physicsBody?.friction = 0.6
-        grenade.physicsBody?.linearDamping = 0.2
-        grenade.physicsBody?.categoryBitMask = PhysicsCategory.weapon
-        grenade.physicsBody?.collisionBitMask = PhysicsCategory.zombie | PhysicsCategory.ground | PhysicsCategory.boundary
-        // No contact-test damage — this weapon deals damage only through its timed explosion,
-        // not by bumping into zombies as it bounces past them.
-        grenade.physicsBody?.contactTestBitMask = PhysicsCategory.none
-        grenade.physicsBody?.velocity = velocity
-        grenade.physicsBody?.angularVelocity = max(-8, min(8, -velocity.dx / 140))
-        attachFuseSpark(to: grenade)
-        grenade.run(.sequence([
-            .wait(forDuration: 2.2),
-            .run { [weak self, weak grenade] in
-                guard let self, let grenade else { return }
-                self.throwExplosive(at: grenade.position, radius: 150, damage: 4.5)
-                grenade.removeFromParent()
-            }
-        ]))
-    }
-
-    private func attachFuseSpark(to grenade: SKNode) {
-        guard !settings.reducedMotion else { return }
-        let spark = SKShapeNode(circleOfRadius: 3)
-        spark.fillColor = .yellow
-        spark.strokeColor = .orange
-        spark.glowWidth = 3
-        spark.position = CGPoint(x: 0, y: 18)
-        spark.zPosition = 1
-        grenade.addChild(spark)
-        spark.run(.repeatForever(.sequence([
-            .scale(to: 1.6, duration: 0.12),
-            .scale(to: 0.8, duration: 0.12)
-        ])))
-    }
-
-    private func launchPropaneTank(preview: SKNode?, velocity: CGVector) {
-        let tank = (preview as? SKSpriteNode) ?? {
-            let fallback = SKSpriteNode(texture: WeaponKind.propaneTank.authoredTexture, size: CGSize(width: 86, height: 58))
-            fallback.position = CGPoint(x: size.width * 0.5, y: groundY + 34)
-            world.addChild(fallback)
-            return fallback
-        }()
-        tank.name = WeaponKind.propaneTank.rawValue
-        tank.zPosition = 30
-        tank.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: 82, height: 34))
-        tank.physicsBody?.mass = 3
-        tank.physicsBody?.categoryBitMask = PhysicsCategory.weapon
-        tank.physicsBody?.collisionBitMask = PhysicsCategory.zombie | PhysicsCategory.ground
-        tank.physicsBody?.contactTestBitMask = PhysicsCategory.zombie
-        tank.physicsBody?.velocity = velocity
-
-        var hasDetonated = false
-        let key = ObjectIdentifier(tank)
-        let detonate: () -> Void = { [weak self, weak tank] in
-            guard let self, let tank, !hasDetonated else { return }
-            hasDetonated = true
-            self.throwExplosive(at: tank.position, radius: 175, damage: 5.5)
-            tank.removeFromParent()
-        }
-        detonatables[key] = Detonatable(node: tank, detonate: detonate)
-        tank.run(.sequence([.wait(forDuration: 2.2), .run { [weak self] in
-            self?.detonatables.removeValue(forKey: key)
-            detonate()
-        }]))
-    }
-
-    /// A genuinely radial, distance-proportional knockback — replaces flat left/right pushes so a
-    /// point-blank hit sends a zombie flying while an edge-of-blast survivor barely staggers, and
-    /// the resulting trajectory (real direction, real magnitude) can chain into other zombies or
-    /// weapon props via ordinary physics collision, instead of every explosion looking the same.
-    private func radialImpulse(from origin: CGPoint, to position: CGPoint, radius: CGFloat, maxImpulse: CGFloat, minImpulse: CGFloat) -> CGVector {
-        let dx = position.x - origin.x
-        // Floors the vertical component so a same-height hit still reads as a launch upward
-        // rather than a shove straight along the ground.
-        let dy = max(60, position.y - origin.y)
-        let distance = max(1, hypot(dx, position.y - origin.y))
-        let falloff = max(0, 1 - distance / radius)
-        let magnitude = minImpulse + (maxImpulse - minImpulse) * falloff
-        let angle = atan2(dy, dx)
-        return CGVector(dx: cos(angle) * magnitude, dy: sin(angle) * magnitude)
-    }
-
-    private func throwExplosive(at point: CGPoint, radius rawRadius: CGFloat, damage: CGFloat, maxImpulse: CGFloat = 460, minImpulse: CGFloat = 140) {
-        let radius = rawRadius * perkSystem.explosiveWeaponRadiusBonus
-        var killTally = 0
-        for zombie in activeZombies where !zombie.isDefeated && hypot(zombie.position.x - point.x, zombie.position.y - point.y) < radius {
-            if zombie.damage(damage * zombie.kind.weaponDamageMultiplier, canOverkill: true) {
-                killTally += 1
-                comboSystem.defeat(zombie, reason: .explosion, multiKillTally: killTally)
-            } else {
-                zombie.launch(with: radialImpulse(from: point, to: zombie.position, radius: radius, maxImpulse: maxImpulse, minImpulse: minImpulse))
-            }
-        }
-        if killTally >= 10 { recordFeat("chain_reaction_10") }
-        playCombatVFX(.explosion, at: point, size: radius * 1.7, direction: 1)
-        SoundManager.shared.play(.explosion)
-        SoundManager.shared.duckMusic(strength: 0.48, duration: 0.42)
-    }
-
-    /// A real `SKPhysicsJointPin` pendulum instead of the old scripted (non-physics) sweep. The
-    /// joint is built here, fresh, using wherever the ball was dragged to at release — not up
-    /// front when armed — so its rest arm always matches the ball's actual release position
-    /// instead of risking a snap back to a stale offset computed before the drag.
-    private func swingWreckingBall(preview: SKNode?, velocity: CGVector) {
-        let ball = (preview as? SKSpriteNode) ?? {
-            let fallback = SKSpriteNode(texture: WeaponKind.wreckingBall.authoredTexture, size: CGSize(width: 118, height: 118))
-            fallback.position = CGPoint(x: wreckingBallPivotPosition.x, y: wreckingBallPivotPosition.y - wreckingBallArmLength)
-            world.addChild(fallback)
-            return fallback
-        }()
-        ball.name = WeaponKind.wreckingBall.rawValue
-        ball.zPosition = 30
-
-        let anchor = SKNode()
-        anchor.position = wreckingBallPivotPosition
-        anchor.physicsBody = SKPhysicsBody(circleOfRadius: 4)
-        anchor.physicsBody?.isDynamic = false
-        anchor.physicsBody?.categoryBitMask = PhysicsCategory.none
-        anchor.physicsBody?.collisionBitMask = PhysicsCategory.none
-        anchor.physicsBody?.contactTestBitMask = PhysicsCategory.none
-        world.addChild(anchor)
-
-        ball.physicsBody = SKPhysicsBody(circleOfRadius: 50)
-        ball.physicsBody?.categoryBitMask = PhysicsCategory.weapon
-        ball.physicsBody?.collisionBitMask = PhysicsCategory.none
-        ball.physicsBody?.contactTestBitMask = PhysicsCategory.zombie
-        ball.physicsBody?.mass = 4
-        ball.physicsBody?.linearDamping = 0.25
-        ball.physicsBody?.angularDamping = 0.4
-        ball.physicsBody?.velocity = velocity
-
-        let joint = SKPhysicsJointPin.joint(withBodyA: anchor.physicsBody!, bodyB: ball.physicsBody!, anchor: anchor.position)
-        physicsWorld.add(joint)
-
-        world.run(.sequence([
-            .wait(forDuration: 6),
-            .run { [weak self, weak anchor, weak ball] in
-                guard let self else { return }
-                self.physicsWorld.remove(joint)
-                anchor?.removeFromParent()
-                ball?.removeFromParent()
-            }
-        ]))
-    }
-
-    /// Drag-aimed piercing shot: everything within a body-width of the aimed line gets hit, full
-    /// damage on the first zombie in the line with falloff per zombie behind it, capped at 4 —
-    /// turns the old single-target near-guaranteed kill into a lane-clear tool.
-    private func fireSniper(through releasePoint: CGPoint) {
-        let origin = defenderMuzzle
-        let raw = CGVector(dx: releasePoint.x - origin.x, dy: releasePoint.y - origin.y)
-        let rawLength = max(1, hypot(raw.dx, raw.dy))
-        let unit = CGVector(dx: raw.dx / rawLength, dy: raw.dy / rawLength)
-        let lineEnd = CGPoint(x: origin.x + unit.dx * size.width * 1.6, y: origin.y + unit.dy * size.width * 1.6)
-        // Matches the ~82% shrink, then a further ~55% shrink, applied to ZombieKind.size, so the
-        // pierce band still tracks roughly one body-width instead of becoming relatively wider
-        // than the zombies it's testing against.
-        let tolerance: CGFloat = 12
-
-        let pierced = activeZombies.filter { !$0.isDefeated }.compactMap { zombie -> (zombie: ZombieNode, along: CGFloat)? in
-            let toZombie = CGVector(dx: zombie.position.x - origin.x, dy: zombie.position.y - origin.y)
-            let along = toZombie.dx * unit.dx + toZombie.dy * unit.dy
-            guard along > 0 else { return nil }
-            let perpendicular = abs(toZombie.dx * unit.dy - toZombie.dy * unit.dx)
-            guard perpendicular <= tolerance else { return nil }
-            return (zombie, along)
-        }.sorted { $0.along < $1.along }.prefix(4)
-
-        let tracerPath = CGMutablePath()
-        tracerPath.move(to: origin)
-        tracerPath.addLine(to: lineEnd)
-        let tracer = SKShapeNode(path: tracerPath)
-        tracer.strokeColor = SKColor(red: 1, green: 0.82, blue: 0.28, alpha: 0.92)
-        tracer.lineWidth = settings.reducedMotion ? 2 : 4
-        tracer.glowWidth = settings.reducedMotion ? 0 : 5
-        tracer.zPosition = 134
-        world.addChild(tracer)
-        tracer.run(.sequence([.wait(forDuration: 0.04), .fadeOut(withDuration: 0.10), .removeFromParent()]))
-
-        for (index, entry) in pierced.enumerated() {
-            let zombie = entry.zombie
-            let falloff = pow(0.5, CGFloat(index))
-            let hitDamage = (zombie.kind.isBoss ? zombie.kind.hitPoints * 0.14 : zombie.kind.hitPoints * 1.2) * falloff
-            if zombie.damage(hitDamage) { comboSystem.defeat(zombie, reason: .weapon) }
-            playDirectionalDebris(at: zombie.position, color: .yellow, direction: zombie.approachesFromLeft ? -1 : 1, count: max(2, 6 - index))
-        }
-        if !pierced.isEmpty { hitStop(duration: 0.14) }
-    }
-
-    /// The painted zone's x-range replaces the old fixed ~420px-wide band at screen center,
-    /// clamped so a barely-there swipe and a full-screen swipe both stay reasonable.
-    private func igniteGreaseFire(along path: [CGPoint]) {
-        let xs = path.map(\.x)
-        let minX = xs.min() ?? size.width / 2
-        let maxX = xs.max() ?? size.width / 2
-        let width = min(320, max(140, maxX - minX))
-        let halfWidth = width / 2
-        let center = CGPoint(x: (minX + maxX) / 2, y: groundY + 20)
-        for tick in 0..<5 {
-            world.run(.sequence([.wait(forDuration: Double(tick) * 0.5), .run { [weak self] in
-                guard let self else { return }
-                for zombie in self.activeZombies where !zombie.isDefeated && abs(zombie.position.x - center.x) < halfWidth {
-                    if zombie.damage(0.85 * zombie.kind.weaponDamageMultiplier) { self.comboSystem.defeat(zombie, reason: .weapon) }
-                }
-                self.playCombatVFX(.explosion, at: center, size: halfWidth * 2.1, direction: 1, tint: .orange)
-            }]))
-        }
-    }
-
-    /// Chains outward from the tapped pole, nearest zombie first — previously chained through
-    /// the first 6 zombies in spawn order, regardless of where they actually were.
-    private func chainLightning() {
-        let origin = transformerPolePosition
-        let ordered = activeZombies
-            .filter { !$0.isDefeated }
-            .sorted { hypot($0.position.x - origin.x, $0.position.y - origin.y) < hypot($1.position.x - origin.x, $1.position.y - origin.y) }
-            .prefix(6)
-        for (index, zombie) in ordered.enumerated() {
-            world.run(.sequence([.wait(forDuration: Double(index) * 0.09), .run { [weak self, weak zombie] in
-                guard let self, let zombie else { return }
-                if zombie.damage(2.4 * zombie.kind.weaponDamageMultiplier) { self.comboSystem.defeat(zombie, reason: .weapon) }
-                self.radialFlash(at: zombie.position, color: .cyan)
-            }]))
-        }
-        radialFlash(at: origin, color: .cyan)
-    }
-
-    /// The truck starts off-screen, so its swipe has no on-screen prop to drag (see
-    /// `spawnAimPreview`) — only where the swipe started (which edge to launch from) and its
-    /// direction (a little vertical drift) matter.
-    private func launchDeliveryTruck(from origin: CGPoint, velocity: CGVector) {
-        let fromLeft = origin.x < size.width / 2
-        let truck = SKSpriteNode(texture: WeaponKind.deliveryTruck.authoredTexture, size: CGSize(width: 190, height: 104))
-        truck.name = WeaponKind.deliveryTruck.rawValue
-        truck.position = CGPoint(x: fromLeft ? -120 : size.width + 120, y: groundY + 48)
-        truck.xScale = fromLeft ? 1 : -1
-        truck.zPosition = 35
-        truck.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: 175, height: 80))
-        truck.physicsBody?.affectedByGravity = false
-        truck.physicsBody?.categoryBitMask = PhysicsCategory.weapon
-        truck.physicsBody?.collisionBitMask = PhysicsCategory.none
-        truck.physicsBody?.contactTestBitMask = PhysicsCategory.zombie
-        let travelDistance = size.width + 240
-        let dx: CGFloat = (fromLeft ? 1 : -1) * travelDistance / 1.05
-        let dy = max(-70, min(70, velocity.dy * 0.12))
-        truck.physicsBody?.velocity = CGVector(dx: dx, dy: dy)
-        world.addChild(truck)
-        truck.run(.sequence([.wait(forDuration: 1.3), .removeFromParent()]))
-    }
-
-    private func launchMeteor(target rawTarget: CGPoint) {
-        let target = CGPoint(x: rawTarget.x, y: groundY + 25)
-        spawnMeteorWarning(at: target)
-        world.run(.sequence([
-            .wait(forDuration: 0.6),
-            .run { [weak self] in self?.dropMeteor(at: target) }
-        ]))
-    }
-
-    private func dropMeteor(at target: CGPoint) {
-        // Frame 1's rock sits toward the streak's leading (lower-right) end, not canvas center —
-        // anchoring there instead of (0.5, 0.5) keeps the actual rock tracking toward `target`
-        // instead of the mostly-empty tail padding.
-        let meteor = SKSpriteNode(texture: EquipmentArt.meteor.actionFrames[0], size: CGSize(width: 150, height: 150))
-        meteor.anchorPoint = CGPoint(x: 0.75, y: 0.32)
-        meteor.xScale = -1 // art's nose points down-right; flight path here always goes down-left
-        meteor.position = CGPoint(x: target.x + 160, y: size.height + 80)
-        meteor.zPosition = 140
-        world.addChild(meteor)
-        meteor.run(.sequence([
-            .move(to: target, duration: 0.48),
-            .run { [weak self] in self?.resolveMeteorImpact(at: target) },
-            .removeFromParent()
-        ]))
-    }
-
-    /// Ground reticle telegraphing where the meteor will land before it drops, so the tap-aimed
-    /// target reads clearly instead of the impact appearing without warning.
-    private func spawnMeteorWarning(at target: CGPoint) {
-        let reticle = SKShapeNode(ellipseOf: CGSize(width: 130, height: 40))
-        reticle.strokeColor = SKColor(red: 1, green: 0.42, blue: 0.12, alpha: 0.85)
-        reticle.lineWidth = 3
-        reticle.glowWidth = settings.reducedMotion ? 0 : 4
-        reticle.fillColor = SKColor(red: 1, green: 0.30, blue: 0.05, alpha: 0.16)
-        reticle.position = CGPoint(x: target.x, y: groundY + 6)
-        reticle.zPosition = 6
-        world.addChild(reticle)
-        reticle.run(.sequence([
-            .repeat(.sequence([.fadeAlpha(to: 0.35, duration: 0.16), .fadeAlpha(to: 1, duration: 0.16)]), count: settings.reducedMotion ? 1 : 2),
-            .wait(forDuration: 0.08),
-            .removeFromParent()
-        ]))
-    }
-
-    private func resolveMeteorImpact(at target: CGPoint) {
-        playMeteorImpactArt(at: target)
-        // Bigger radial impulse than a grenade/propane blast, matching the "enormous physics
-        // impulse" this weapon is meant for.
-        throwExplosive(at: target, radius: 260, damage: 10, maxImpulse: 640, minImpulse: 220)
-    }
-
-    /// Bespoke impact-flash-to-smoke-cloud sequence layered on top of the generic radial
-    /// `.explosion` VFX every other explosive weapon shares — the meteor art was authored with
-    /// its own distinct look, so it gets its own frames instead of just the shared procedural one.
-    /// Both frames are composed with their ground contact at the very bottom of the canvas, so a
-    /// bottom-center anchor keeps the explosion rooted at `target` instead of floating around it.
-    private func playMeteorImpactArt(at target: CGPoint) {
-        let impact = SKSpriteNode(texture: EquipmentArt.meteor.actionFrames[1], size: CGSize(width: 280, height: 280))
-        impact.anchorPoint = CGPoint(x: 0.5, y: 0)
-        impact.position = target
-        impact.zPosition = 135
-        impact.alpha = 0
-        world.addChild(impact)
-        impact.run(.sequence([
-            .group([.fadeIn(withDuration: 0.05), .scale(to: 1.1, duration: 0.12)]),
-            .wait(forDuration: 0.10),
-            .run { impact.texture = EquipmentArt.meteor.actionFrames[2] },
-            .wait(forDuration: 0.26),
-            .fadeOut(withDuration: 0.30),
-            .removeFromParent()
-        ]))
-    }
-
-    func spawnPhysicsDebris(from zombie: ZombieNode, reason: DefeatReason) {
-        let impulseScale: CGFloat = reason == .explosion ? 1.8 : (zombie.kind.isBoss ? 0.75 : 1)
-        if !settings.reducedMotion {
-            let pieces = zombie.makePhysicsDebris()
-            for (index, debris) in pieces.enumerated() {
-                debris.position = zombie.position
-                debris.zPosition = 28
-                world.addChild(debris)
-                let spread = CGFloat(index - 2) * 42 + CGFloat.random(in: -26...26)
-                debris.physicsBody?.applyImpulse(CGVector(dx: spread * impulseScale, dy: CGFloat.random(in: 90...180) * impulseScale))
-                debris.physicsBody?.angularVelocity = CGFloat.random(in: -7...7)
-                debris.run(.sequence([.wait(forDuration: 2.4), .fadeOut(withDuration: 0.5), .removeFromParent()]))
-            }
-        }
-        let splatterScale = (zombie.kind.isBoss ? 1.7 : 1) * (reason == .explosion ? 1.5 : 1)
-        spawnGoreSplatter(
-            at: zombie.position,
-            scale: splatterScale,
-            direction: zombie.approachesFromLeft ? -1 : 1,
-            reason: reason
-        )
-    }
-
-    /// Layered cartoon gore: a fast airborne burst followed by streaks, satellite drops, and a
-    /// long-lived ground stain. Explosions throw gore radially while impacts preserve momentum.
-    private func spawnGoreSplatter(at point: CGPoint, scale: CGFloat, direction: CGFloat, reason: DefeatReason) {
-        let baseColor = SKColor(red: 0.34, green: 0.58, blue: 0.08, alpha: 1)
-        if !settings.reducedMotion {
-            spawnAirborneGore(at: point, scale: scale, direction: direction, radial: reason == .explosion)
-        }
-
-        let container = SKNode()
-        container.position = CGPoint(x: point.x, y: groundY + 2)
-        container.zPosition = 2
-        world.addChild(container)
-
-        let pool = SKShapeNode(path: splatterBlobPath(radius: 35 * scale, verticalScale: 0.32))
-        pool.fillColor = baseColor.withAlphaComponent(0.66)
-        pool.strokeColor = .clear
-        container.addChild(pool)
-
-        let core = SKShapeNode(path: splatterBlobPath(radius: 20 * scale, points: 8, verticalScale: 0.28))
-        core.fillColor = SKColor(red: 0.16, green: 0.33, blue: 0.04, alpha: 0.62)
-        core.strokeColor = .clear
-        core.position = CGPoint(x: direction * 5 * scale, y: 0)
-        container.addChild(core)
-
-        let streakCount = reason == .explosion ? 8 : 5
-        for index in 0..<streakCount {
-            let angle: CGFloat = reason == .explosion
-                ? CGFloat(index) / CGFloat(streakCount) * .pi * 2 + CGFloat.random(in: -0.18...0.18)
-                : CGFloat.random(in: -0.42...0.42) + (direction < 0 ? .pi : 0)
-            let length = CGFloat.random(in: 30...88) * scale
-            let width = CGFloat.random(in: 3...7) * scale
-            let streak = SKShapeNode(path: splatterStreakPath(length: length, width: width))
-            streak.fillColor = baseColor.withAlphaComponent(CGFloat.random(in: 0.34...0.58))
-            streak.strokeColor = .clear
-            streak.zRotation = angle
-            container.addChild(streak)
-        }
-
-        let dropletCount = Int((reason == .explosion ? 13 : 9) * scale)
-        for _ in 0..<dropletCount {
-            let droplet = SKShapeNode(path: splatterBlobPath(radius: CGFloat.random(in: 3...10) * scale, points: 7, verticalScale: CGFloat.random(in: 0.28...0.58)))
-            droplet.fillColor = Bool.random()
-                ? baseColor.withAlphaComponent(CGFloat.random(in: 0.42...0.68))
-                : SKColor(red: 0.54, green: 0.76, blue: 0.12, alpha: CGFloat.random(in: 0.38...0.60))
-            droplet.strokeColor = .clear
-            let angle = reason == .explosion ? CGFloat.random(in: 0...(.pi * 2)) : CGFloat.random(in: -0.48...0.48) + (direction < 0 ? .pi : 0)
-            let travel = CGFloat.random(in: 24...116) * scale
-            droplet.position = CGPoint(x: cos(angle) * travel, y: sin(angle) * travel * 0.18)
-            container.addChild(droplet)
-        }
-
-        container.alpha = 0
-        container.setScale(0.6)
-        container.run(.sequence([
-            .group([.fadeAlpha(to: 1, duration: 0.06), .scale(to: 1.08, duration: 0.09)]),
-            .scale(to: 1, duration: 0.08),
-            .wait(forDuration: Double.random(in: 17...25)),
-            .fadeOut(withDuration: 3.5),
-            .removeFromParent()
-        ]))
-        retainGoreStain(container)
-    }
-
-    private func spawnAirborneGore(at point: CGPoint, scale: CGFloat, direction: CGFloat, radial: Bool) {
-        let count = min(34, Int((radial ? 24 : 16) * scale))
-        for index in 0..<count {
-            guard activeGoreDroplets < 90 else { break }
-            let angle = radial
-                ? CGFloat(index) / CGFloat(count) * .pi * 2 + CGFloat.random(in: -0.22...0.22)
-                : CGFloat.random(in: -0.72...0.34) + (direction < 0 ? .pi : 0)
-            let distance = CGFloat.random(in: 48...155) * scale
-            let landing = CGPoint(
-                x: max(8, min(size.width - 8, point.x + cos(angle) * distance)),
-                y: groundY + CGFloat.random(in: 2...10)
-            )
-            let peak = CGPoint(
-                x: point.x + (landing.x - point.x) * 0.42,
-                y: min(size.height - 20, point.y + CGFloat.random(in: 35...105) * scale)
-            )
-            let radius = CGFloat.random(in: 2.5...7.5) * min(1.5, scale)
-            let droplet = SKShapeNode(path: splatterBlobPath(radius: radius, points: 6, verticalScale: CGFloat.random(in: 0.7...1.35)))
-            droplet.fillColor = index.isMultiple(of: 4)
-                ? SKColor(red: 0.62, green: 0.82, blue: 0.14, alpha: 0.88)
-                : SKColor(red: 0.28, green: 0.54, blue: 0.06, alpha: 0.92)
-            droplet.strokeColor = .clear
-            droplet.position = point
-            droplet.zPosition = 130 + CGFloat(index % 3)
-            world.addChild(droplet)
-            activeGoreDroplets += 1
-            droplet.run(.sequence([
-                .group([.move(to: peak, duration: Double.random(in: 0.10...0.18)), .rotate(byAngle: CGFloat.random(in: -1.8...1.8), duration: 0.14)]),
-                .group([.move(to: landing, duration: Double.random(in: 0.18...0.30)), .scaleY(to: 0.28, duration: 0.24)]),
-                .wait(forDuration: Double.random(in: 1.0...2.1)),
-                .fadeOut(withDuration: 0.7),
-                .run { [weak self] in
-                    guard let self else { return }
-                    self.activeGoreDroplets = max(0, self.activeGoreDroplets - 1)
-                },
-                .removeFromParent()
-            ]))
-        }
-    }
-
-    private func retainGoreStain(_ stain: SKNode) {
-        goreStains.removeAll { $0.parent == nil }
-        goreStains.append(stain)
-        while goreStains.count > 28 {
-            let oldest = goreStains.removeFirst()
-            oldest.removeAllActions()
-            oldest.run(.sequence([.fadeOut(withDuration: 0.35), .removeFromParent()]))
-        }
-    }
-
-    private func splatterBlobPath(radius: CGFloat, points: Int = 9, verticalScale: CGFloat = 0.5) -> CGPath {
-        let path = CGMutablePath()
-        for index in 0..<points {
-            let angle = (CGFloat(index) / CGFloat(points)) * .pi * 2
-            let jittered = radius * CGFloat.random(in: 0.7...1.15)
-            let vertex = CGPoint(x: cos(angle) * jittered, y: sin(angle) * jittered * verticalScale)
-            if index == 0 { path.move(to: vertex) } else { path.addLine(to: vertex) }
-        }
-        path.closeSubpath()
-        return path
-    }
-
-    private func splatterStreakPath(length: CGFloat, width: CGFloat) -> CGPath {
-        let path = CGMutablePath()
-        path.move(to: CGPoint(x: 0, y: -width))
-        path.addCurve(to: CGPoint(x: length, y: 0), control1: CGPoint(x: length * 0.35, y: -width * 0.75), control2: CGPoint(x: length * 0.82, y: -width * 0.18))
-        path.addCurve(to: CGPoint(x: 0, y: width), control1: CGPoint(x: length * 0.78, y: width * 0.20), control2: CGPoint(x: length * 0.28, y: width * 0.72))
-        path.closeSubpath()
-        return path
-    }
-
-    private func airstrikeImpact(x: CGFloat) {
-        let point = CGPoint(x: x, y: groundY + 35)
-        for zombie in activeZombies where !zombie.isDefeated && abs(zombie.position.x - x) < size.width * 0.22 {
-            if zombie.damage(5) { comboSystem.defeat(zombie, reason: .weapon) }
-        }
-        playCombatVFX(.explosion, at: point, size: 238, direction: indexDirection(for: x))
-        SoundManager.shared.play(.explosion)
-        SoundManager.shared.duckMusic(strength: 0.44, duration: 0.36)
-        shakeCamera(intensity: 1.1)
-    }
-
-    private func placeSpikeStrips() {
-        for x in [houseFrame.minX - 115, houseFrame.maxX + 115] {
-            let strip = SKSpriteNode(texture: EquipmentArt.spikeStrip.actionFrames[0], size: CGSize(width: 135, height: 54))
-            strip.position = CGPoint(x: x, y: groundY + 10)
-            strip.zPosition = 8
-            strip.physicsBody = SKPhysicsBody(rectangleOf: CGSize(width: 125, height: 30))
-            strip.physicsBody?.isDynamic = false
-            strip.physicsBody?.categoryBitMask = PhysicsCategory.trap
-            strip.physicsBody?.collisionBitMask = PhysicsCategory.none
-            strip.physicsBody?.contactTestBitMask = PhysicsCategory.zombie
-            world.addChild(strip)
-            if settings.reducedMotion { strip.texture = EquipmentArt.spikeStrip.actionFrames[2] }
-            else { strip.run(.animate(with: EquipmentArt.spikeStrip.actionFrames, timePerFrame: 0.09, resize: false, restore: false), withKey: "artFrames") }
-            if !settings.reducedMotion {
-                strip.setScale(0.15)
-                strip.run(.sequence([.scale(to: 1.12, duration: 0.12), .scale(to: 1, duration: 0.1)]))
-            }
-            strip.run(.sequence([.wait(forDuration: 9), .fadeOut(withDuration: 0.3), .removeFromParent()]))
-        }
-    }
-
-    private func triggerFreezer() {
-        let freezer = SKSpriteNode(texture: EquipmentArt.flashFreezer.actionFrames[0], size: CGSize(width: 150, height: 116))
-        freezer.position = CGPoint(x: size.width / 2, y: groundY + 58)
-        freezer.zPosition = 136
-        world.addChild(freezer)
-        if settings.reducedMotion { freezer.texture = EquipmentArt.flashFreezer.actionFrames[2] }
-        else { freezer.run(.animate(with: EquipmentArt.flashFreezer.actionFrames, timePerFrame: 0.10, resize: false, restore: false), withKey: "artFrames") }
-        if !settings.reducedMotion {
-            freezer.run(.sequence([
-                .group([.scale(to: 1.12, duration: 0.12), .rotate(byAngle: -0.04, duration: 0.12)]),
-                .group([.scale(to: 1, duration: 0.16), .rotate(toAngle: 0, duration: 0.16)]),
-                .wait(forDuration: 0.35),
-                .fadeOut(withDuration: 0.24),
-                .removeFromParent()
-            ]))
-        } else {
-            freezer.run(.sequence([.wait(forDuration: 0.4), .removeFromParent()]))
-        }
-        for zombie in activeZombies where !zombie.isDefeated && !zombie.isGrabbed && !zombie.isThrown {
-            zombie.freezeSolid(for: 7, reducedMotion: settings.reducedMotion)
-        }
-        playCombatVFX(.freezerBurst, at: CGPoint(x: size.width / 2, y: groundY + 84), size: min(size.width * 0.72, 520), direction: 1)
-        radialFlash(at: CGPoint(x: size.width / 2, y: size.height / 2), color: .cyan)
-    }
-
-    private func tickCooldowns(_ deltaTime: TimeInterval) {
-        for key in weaponCooldowns.keys { weaponCooldowns[key] = max(0, weaponCooldowns[key, default: 0] - deltaTime) }
-        for key in trapCooldowns.keys { trapCooldowns[key] = max(0, trapCooldowns[key, default: 0] - deltaTime) }
-    }
+    /// Forwards to `weaponSystem` — kept as a same-named GameScene member because ComboSystemHost
+    /// (which predates WeaponSystem's extraction) still requires it.
+    func explodeVolatile(at point: CGPoint) { weaponSystem.explodeVolatile(at: point) }
 
     func finish(won: Bool) {
         guard !gameOver else { return }
@@ -1855,7 +701,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             var candidate: SKNode? = node
             while let current = candidate {
                 if let name = current.name, name.hasPrefix("pickup-"), let weapon = WeaponKind(rawValue: String(name.dropFirst(7))) {
-                    weaponCooldowns[weapon] = 0
+                    weaponSystem.weaponCooldowns[weapon] = 0
                     specialCharge = min(1, specialCharge + 0.20 * Double(perkSystem.chargeRushBonus))
                     current.removeFromParent()
                     SoundManager.shared.play(.pickup)
@@ -1891,9 +737,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             health: health,
             maximumHealth: startingHealth,
             specialCharge: specialCharge,
-            weaponCooldowns: weaponCooldowns,
-            trapCooldowns: trapCooldowns,
-            armedWeapon: armedWeapon,
+            weaponCooldowns: weaponSystem.weaponCooldowns,
+            trapCooldowns: weaponSystem.trapCooldowns,
+            armedWeapon: weaponSystem.armedWeapon,
             perkChoices: perkSystem.pendingPerkChoices
         ))
     }
@@ -2020,7 +866,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
 
-    private func playDirectionalDebris(at point: CGPoint, color: SKColor, direction: CGFloat, count: Int) {
+    func playDirectionalDebris(at point: CGPoint, color: SKColor, direction: CGFloat, count: Int) {
         let particleCount = settings.reducedMotion ? min(4, count) : count
         for index in 0..<particleCount {
             let shard = SKShapeNode(rectOf: CGSize(width: CGFloat.random(in: 3...8), height: CGFloat.random(in: 2...5)), cornerRadius: 1)
@@ -2034,22 +880,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             let dy = CGFloat.random(in: 24...92) - abs(spread) * 18
             shard.run(.sequence([.group([.moveBy(x: dx, y: dy, duration: 0.28), .rotate(byAngle: spread * .pi * 4, duration: 0.28), .fadeOut(withDuration: 0.31)]), .removeFromParent()]))
         }
-    }
-
-    private func indexDirection(for x: CGFloat) -> CGFloat {
-        x < size.width / 2 ? -1 : 1
-    }
-
-    private func radialFlash(at point: CGPoint, color: SKColor) {
-        guard settings.flashesEnabled else { return }
-        let ring = SKShapeNode(circleOfRadius: 24)
-        ring.fillColor = .clear
-        ring.strokeColor = color
-        ring.lineWidth = 12
-        ring.position = point
-        ring.zPosition = 130
-        world.addChild(ring)
-        ring.run(.sequence([.group([.scale(to: settings.reducedMotion ? 2 : 7, duration: 0.32), .fadeOut(withDuration: 0.34)]), .removeFromParent()]))
     }
 
     /// `subtitle` (e.g. a wave modifier's banner text) renders as a second, smaller line under
@@ -2080,7 +910,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// Queues a feat/achievement for the small delayed toast (see drainFeatToastsIfNeeded), but
     /// only the first time it's earned this run — several of the call sites (e.g. the per-frame
     /// SKY_LAUNCH height check) would otherwise re-fire every frame the condition still holds.
-    private func recordFeat(_ id: String) {
+    func recordFeat(_ id: String) {
         guard achievedFeats.insert(id).inserted else { return }
         pendingFeatToasts.append(id)
         drainFeatToastsIfNeeded()
@@ -2153,22 +983,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         UIImpactFeedbackGenerator(style: style).impactOccurred()
     }
 
-    /// Running kill count stashed directly on a projectile's own `userData` (self-cleaning — it
-    /// disappears with the node, no external dictionary to prune) so ZOMBIE BOWLING can tell a
-    /// bowling ball's 2nd+ kill on a single roll apart from its first.
-    private func incrementKillTally(on node: SKNode?) -> Int {
-        guard let node else { return 1 }
-        let key = "killTally"
-        let userData = node.userData ?? {
-            let dictionary = NSMutableDictionary()
-            node.userData = dictionary
-            return dictionary
-        }()
-        let tally = ((userData[key] as? Int) ?? 0) + 1
-        userData[key] = tally
-        return tally
-    }
-
     /// Stumble/knockback/slam/monster haptic tiers matching ZombieNode.lastImpactPower's 0...1.4
     /// scale, so a tiny flick barely taps and a monster slam hits as hard as UIKit allows.
     func impactHapticStyle(for power: CGFloat) -> UIImpactFeedbackGenerator.FeedbackStyle {
@@ -2206,3 +1020,4 @@ extension GameScene: PerkSystemHost {}
 extension GameScene: ComboSystemHost {}
 extension GameScene: SpawnDirectorHost {}
 extension GameScene: BossDirectorHost {}
+extension GameScene: WeaponSystemHost {}
