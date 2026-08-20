@@ -36,7 +36,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     weak var gameDelegate: GameSceneDelegate?
 
     let level: GameLevel
-    private let settings: GameSettings
+    let settings: GameSettings
     private let progress: PlayerProgress
 
     var isGameplayPaused = false {
@@ -50,7 +50,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
 
-    private let world = SKNode()
+    let world = SKNode()
     private var dinerNode: DinerNode?
     private var selectedZombies: [ObjectIdentifier: ZombieNode] = [:]
     private var touchSamples: [ObjectIdentifier: [(point: CGPoint, time: TimeInterval)]] = [:]
@@ -69,31 +69,28 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private struct Detonatable { let node: SKNode; let detonate: () -> Void }
     private var detonatables: [ObjectIdentifier: Detonatable] = [:]
     private var lastUpdateTime: TimeInterval = 0
-    private var elapsedTime: TimeInterval = 0
+    var elapsedTime: TimeInterval = 0
     private var timeSinceSpawn: TimeInterval = 0
     private var movementAudioRemaining: TimeInterval = 0.7
-    private var score = 0
-    private var health: Int
-    private var wave = 1
+    var health: Int
+    var wave = 1
     private var waveStatus = "WAVE 1"
     private var waveStatusHighlighted = false
-    private var spawnedInWave = 0
-    private var currentWaveTarget = 0
+    var spawnedInWave = 0
+    var currentWaveTarget = 0
     private var intermissionRemaining: TimeInterval = 0
-    private var combo = 0
-    private var maxCombo = 0
-    private var defeats = 0
-    private var lastDefeatTime: TimeInterval = -10
-    private var specialCharge = 0.0
+    /// Kill scoring, combo tracking, and their on-kill feedback popups.
+    private let comboSystem = ComboSystem()
+    var specialCharge = 0.0
     private var weaponCooldowns: [WeaponKind: TimeInterval] = [:]
     private var trapCooldowns: [TrapKind: TimeInterval] = [:]
-    private var gameOver = false
+    var gameOver = false
     private var spawningFinished = false
     private var didBuildWorld = false
     private var spawnedBossWaves: Set<Int> = []
     /// Roguelite perk state and mechanical bonuses — endless-only, in-memory for this run only
     /// (never touches ProgressStore/PlayerProgress, which is permanent cross-run progression).
-    private let perkSystem = PerkSystem()
+    let perkSystem = PerkSystem()
     /// Endless-only, re-rolled once per wave (see rollWaveModifier) — unlike `perkSystem`'s stacks,
     /// exclusive (only one at a time) and lasts exactly one wave rather than accumulating.
     private var activeModifier: WaveModifier?
@@ -123,21 +120,21 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private let zombieSpeedScale: CGFloat = 0.85
     private var sandboxSpeed: CGFloat = 1
     private var sandboxSpawnBurst = 1
-    private var sandboxDefeats = 0
-    private var finishingReplayUsed = false
+    var sandboxDefeats = 0
+    var finishingReplayUsed = false
     private var sceneryDamage = 0
     private var goreStains: [SKNode] = []
     private var activeGoreDroplets = 0
     /// .doubleSided alternates strictly left/right/left/right rather than trusting Bool.random(),
     /// which could otherwise streak several spawns from the same side and read as a standard mission.
     private var nextDoubleSidedFromLeft = true
-    private let bossHUD = SKNode()
+    let bossHUD = SKNode()
     private let bossHealthFill = SKShapeNode(rectOf: CGSize(width: 260, height: 12), cornerRadius: 6)
     private let bossNameLabel = SKLabelNode(fontNamed: "AvenirNext-Heavy")
 
     // 9_999, not 99: with the numeric health pool a fully upgraded diner's real max (up to 160)
     // could otherwise exceed sandbox's old "effectively unlimited" value.
-    private var startingHealth: Int { level.isSandbox ? 9_999 : (level.modifier == .suddenDeath ? 1 : GameRules.startingHealth + progress.upgradeLevel(.reinforcedDiner) * GameRules.reinforcedDinerHealthPerLevel) }
+    var startingHealth: Int { level.isSandbox ? 9_999 : (level.modifier == .suddenDeath ? 1 : GameRules.startingHealth + progress.upgradeLevel(.reinforcedDiner) * GameRules.reinforcedDinerHealthPerLevel) }
     private var flickMultiplier: CGFloat { (1 + CGFloat(progress.upgradeLevel(.flickTraining)) * 0.10) * perkSystem.flickVelocityBonus }
     private var rapidGearLevel: Int { progress.upgradeLevel(.rapidGear) }
     private var groundY: CGFloat { max(70, size.height * 0.13) }
@@ -167,6 +164,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         guard !didBuildWorld else { return }
         didBuildWorld = true
         perkSystem.host = self
+        comboSystem.host = self
         backgroundColor = level.skyColor
         physicsWorld.gravity = CGVector(dx: 0, dy: level.modifier == .lowGravity ? -3.8 : -8.8)
         physicsWorld.contactDelegate = self
@@ -281,7 +279,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             if !zombie.isGrabbed, !zombie.isThrown, zombieHasReachedHouse(zombie) {
                 zombieReachedHouse(zombie)
             } else if zombie.position.y < -170 || zombie.position.x < -220 || zombie.position.x > size.width + 220 {
-                defeat(zombie, reason: .thrownOut)
+                comboSystem.defeat(zombie, reason: .thrownOut)
             }
         }
         if movementAudioRemaining <= 0,
@@ -979,7 +977,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 // rolls through several zombies knows this is its 2nd+ kill — that's ZOMBIE BOWLING.
                 let tally = incrementKillTally(on: weaponBody.node)
                 if weaponKind == .bowlingBall, tally >= 3 { recordFeat("bowling_triple") }
-                defeat(zombie, reason: .weapon, multiKillTally: tally, weaponKind: weaponKind)
+                comboSystem.defeat(zombie, reason: .weapon, multiKillTally: tally, weaponKind: weaponKind)
             } else {
                 SoundManager.shared.playZombieVoice(for: zombie.kind, moment: .hurt, pan: audioPan(for: zombie))
                 // A walking zombie's body is kinematic (isDynamic == false, see ZombieNode.init),
@@ -999,7 +997,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             playCombatVFX(.zombieSplatter, at: contact.contactPoint, size: 76, direction: zombie.approachesFromLeft ? -1 : 1)
             let baseDamage: CGFloat = zombie.kind == .armored ? 0.7 : 1.5
             if zombie.damage(baseDamage * zombie.kind.trapDamageMultiplier) {
-                defeat(zombie, reason: .trap)
+                comboSystem.defeat(zombie, reason: .trap)
             } else {
                 SoundManager.shared.playZombieVoice(for: zombie.kind, moment: .hurt, pan: audioPan(for: zombie))
             }
@@ -1032,7 +1030,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                     // another zombie" when the other one was actually thrown/knocked in, not an
                     // ordinary crowd-pressure kill the boss happened to be standing in.
                     if zombie.kind.isBoss, let otherZombie, otherZombie.isThrown { recordFeat("boss_friendly_fire") }
-                    defeat(zombie, reason: .collision)
+                    comboSystem.defeat(zombie, reason: .collision)
                 } else if zombie.canBeKnockedBack, let otherZombie {
                     knockback(zombie, awayFrom: otherZombie.position, magnitude: contact.collisionImpulse)
                 }
@@ -1060,8 +1058,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         let power = min(300, max(90, magnitude * 3.2))
         knockback(zombie, impulse: CGVector(dx: sign * power, dy: power * 0.6))
     }
-
-    private enum DefeatReason { case impact, collision, weapon, trap, thrownOut, explosion }
 
     /// Central place for weapon-specific impact sounds, keyed by the WeaponKind name every weapon
     /// node is now tagged with, so a new weapon needing a unique impact sound is one case here
@@ -1105,7 +1101,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             }
         }
         if zombie.damage(damage, canOverkill: zombie.isFrozenSolid) {
-            defeat(zombie, reason: .impact)
+            comboSystem.defeat(zombie, reason: .impact)
         } else {
             if Int.random(in: 0..<3) == 0 {
                 SoundManager.shared.playZombieVoice(for: zombie.kind, moment: .hurt, pan: audioPan(for: zombie))
@@ -1178,7 +1174,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         return zombie
     }
 
-    private var activeZombies: [ZombieNode] {
+    var activeZombies: [ZombieNode] {
         world.children.compactMap { $0 as? ZombieNode }
     }
 
@@ -1320,7 +1316,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         // so the diner is never literally unkillable, just much tankier.
         let bite = level.isSandbox ? 0 : max(1, Int((CGFloat(zombie.kind.dinerDamage) * perkSystem.fortifiedDinerReduction).rounded()))
         health = level.isSandbox ? health : max(0, health - bite)
-        combo = 0
+        comboSystem.resetCombo()
         dinerNode?.takeHit(remainingHealth: health, maximumHealth: startingHealth)
         damageScenery(near: zombie.position)
         let strikeX = zombie.position.x < size.width / 2 ? houseFrame.minX + 28 : houseFrame.maxX - 28
@@ -1340,124 +1336,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         if health == 0 { finish(won: false) }
     }
 
-    /// - Parameters:
-    ///   - multiKillTally: this kill's position (1-based) within a single weapon/blast pass —
-    ///     e.g. the bowling ball's 2nd zombie on one roll, or an explosion's 2nd victim. Fuels
-    ///     ZOMBIE BOWLING/CHAIN REACTION. Defaults to 1 (an unrelated, standalone kill).
-    ///   - weaponKind: which weapon caused a `.weapon` kill, needed to tell a bowling multi-kill
-    ///     apart from any other weapon's. nil for every other reason.
-    private func defeat(_ zombie: ZombieNode, reason: DefeatReason, multiKillTally: Int = 1, weaponKind: WeaponKind? = nil) {
-        guard zombie.parent != nil, !zombie.isDefeated else { return }
-        let gapSincePreviousKill = elapsedTime - lastDefeatTime
-        if gapSincePreviousKill <= 1.8 + perkSystem.comboWindowBonus { combo += 1 } else { combo = 1 }
-        maxCombo = max(maxCombo, combo)
-        defeats += 1
-        if level.isSandbox { sandboxDefeats += 1 }
-        lastDefeatTime = elapsedTime
-        // 0 unless this kill was the direct result of a flick/knockback landing or slamming into
-        // something (see ZombieNode.lastImpactPower) — a weapon/trap/collision kill with no throw
-        // of its own keeps the previous fixed feel below.
-        let power = zombie.lastImpactPower
-        // Read before playDefeat() below overwrites it to .defeated — DINER SPECIAL needs to know
-        // whether this zombie was actively latched onto the diner at the moment it died.
-        let preDefeatState = zombie.currentAnimationState
-        let event = comboEvent(
-            reason: reason, combo: combo, gapSincePreviousKill: gapSincePreviousKill,
-            multiKillTally: multiKillTally, weaponKind: weaponKind, impactPower: power, preDefeatState: preDefeatState
-        )
-        let killScore = GameRules.score(for: zombie.kind, combo: combo, event: event)
-        score += killScore
-        let chargeGain = (zombie.kind.isBoss ? 0.5 : (zombie.kind == .brute ? 0.22 : 0.12)) * Double(perkSystem.chargeRushBonus)
-        specialCharge = min(1, specialCharge + chargeGain)
-        let point = zombie.position
-        let volatile = zombie.kind == .volatile
-        if settings.goreEnabled {
-            spawnPhysicsDebris(from: zombie, reason: reason)
-        }
-        zombie.playDefeat(style: defeatStyle(for: reason), reducedMotion: settings.reducedMotion) {}
-        if zombie.kind.isBoss {
-            bossHUD.isHidden = true
-            SoundManager.shared.updateGameplayMix(wave: wave, healthFraction: CGFloat(health) / CGFloat(max(1, startingHealth)))
-        }
-        // Computed fresh here rather than trusting `spawningFinished`: that flag only updates once
-        // per frame in updateCampaignWave, which runs before this frame's physics contacts resolve,
-        // so it's always one kill behind the zombie that's actually dying right now.
-        let isFinalCampaignKill = !level.isEndless && !level.isSandbox
-            && wave >= level.totalWaves
-            && spawnedInWave >= currentWaveTarget
-            && activeZombies.allSatisfy { $0.isDefeated }
-        if !finishingReplayUsed, !settings.reducedMotion, (zombie.kind.isBoss || isFinalCampaignKill) {
-            finishingReplayUsed = true
-            world.speed = 0.22
-            run(.sequence([.wait(forDuration: 0.5), .run { [weak self] in self?.world.speed = 1 }]), withKey: "finisherReplay")
-        }
-        if reason == .thrownOut {
-            burst(at: point, color: .cyan)
-        } else if reason != .explosion {
-            let baseSplatterSize: CGFloat = zombie.kind.isBoss ? 210 : (zombie.kind == .brute ? 156 : 118)
-            playCombatVFX(.zombieSplatter, at: point, size: baseSplatterSize + power * 48, direction: zombie.approachesFromLeft ? -1 : 1)
-        }
-        SoundManager.shared.play(.defeat, comboScale: combo, intensity: 0.8 + power * 0.75)
-        if zombie.kind.isBoss || zombie.kind.alwaysVocalizesOnDefeat || Int.random(in: 0..<3) == 0 {
-            SoundManager.shared.playZombieVoice(for: zombie.kind, moment: .defeat, pan: audioPan(for: zombie))
-        }
-        // A flick/knockback-driven kill scales its haptic and screen shake with how hard it was
-        // actually hit instead of every kill feeling identically "medium" — a bare stumble kill
-        // reads lighter, a monster-flick slam kill hits noticeably harder.
-        runHaptic(power > 0 ? impactHapticStyle(for: power) : .medium)
-        if power > 0.3 { shakeCamera(intensity: 0.2 + power * 1.1) }
-        showScorePopup(at: point, score: killScore)
-        if let event {
-            showComboEvent(event, at: point, power: power)
-        } else {
-            showCombo(at: point)
-        }
-        hitStop(duration: min(0.13, 0.045 + Double(combo) * 0.004 + Double(power) * 0.05))
-        if Int.random(in: 0..<5) == 0 { spawnPickup(at: point) }
-        if volatile, reason != .explosion { explodeVolatile(at: point) }
-    }
-
-    /// Picks the single highest-priority named event this kill qualifies for (see ComboEvent's
-    /// case docs), or nil for an ordinary kill. Order matters: a rarer, more specific feat (e.g. a
-    /// bowling multi-kill) wins over a merely-coincidental one (two unrelated kills that happened
-    /// to land within a fraction of a second of each other).
-    private func comboEvent(
-        reason: DefeatReason,
-        combo: Int,
-        gapSincePreviousKill: TimeInterval,
-        multiKillTally: Int,
-        weaponKind: WeaponKind?,
-        impactPower: CGFloat,
-        preDefeatState: ZombieAnimationState
-    ) -> ComboEvent? {
-        if reason == .thrownOut { return .airMail }
-        if reason == .collision { return .friendlyFire }
-        if reason == .weapon, weaponKind == .bowlingBall, multiKillTally >= 2 { return .zombieBowling }
-        if reason == .explosion, multiKillTally >= 2 { return .chainReaction }
-        if preDefeatState == .attacking || preDefeatState == .holdingAtDiner { return .dinerSpecial }
-        if reason == .impact, impactPower > 0.85 { return .headOverHeels }
-        if combo >= 6 { return .graveyardShift }
-        if combo >= 2, gapSincePreviousKill < 0.35 { return .doubleTap }
-        return nil
-    }
-
-    private func defeatStyle(for reason: DefeatReason) -> ZombieDefeatStyle {
-        switch reason {
-        case .impact: .pavement
-        case .collision: .collision
-        case .weapon: .weapon
-        case .trap: .trap
-        case .thrownOut: .thrownOut
-        case .explosion: .explosion
-        }
-    }
-
-    private func audioPan(for zombie: ZombieNode) -> Float {
+    func audioPan(for zombie: ZombieNode) -> Float {
         let normalized = (zombie.position.x / max(1, size.width)) * 2 - 1
         return Float(max(-0.9, min(0.9, normalized)))
     }
 
-    private func explodeVolatile(at point: CGPoint) {
+    func explodeVolatile(at point: CGPoint) {
         let radius: CGFloat = 170 * perkSystem.volatileBlastRadiusBonus
         let nearby = activeZombies.filter {
             !$0.isDefeated && hypot($0.position.x - point.x, $0.position.y - point.y) < radius
@@ -1466,7 +1350,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         for zombie in nearby {
             if zombie.damage(1.6) {
                 killTally += 1
-                defeat(zombie, reason: .explosion, multiKillTally: killTally)
+                comboSystem.defeat(zombie, reason: .explosion, multiKillTally: killTally)
             } else {
                 zombie.launch(with: radialImpulse(from: point, to: zombie.position, radius: radius, maxImpulse: 380, minImpulse: 140))
             }
@@ -1534,7 +1418,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             let damage = (1.0 + proximity * 3.4) * zombie.kind.weaponDamageMultiplier
             let impulse = radialImpulse(from: origin, to: zombie.position, radius: range, maxImpulse: 760, minImpulse: 210)
             zombie.launch(with: impulse)
-            if zombie.damage(damage) { defeat(zombie, reason: .weapon) }
+            if zombie.damage(damage) { comboSystem.defeat(zombie, reason: .weapon) }
         }
         fireBuckshotSpread(from: origin, angle: aimAngle)
         radialFlash(at: origin, color: .yellow)
@@ -1731,7 +1615,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         for zombie in activeZombies where !zombie.isDefeated && hypot(zombie.position.x - point.x, zombie.position.y - point.y) < radius {
             if zombie.damage(damage * zombie.kind.weaponDamageMultiplier, canOverkill: true) {
                 killTally += 1
-                defeat(zombie, reason: .explosion, multiKillTally: killTally)
+                comboSystem.defeat(zombie, reason: .explosion, multiKillTally: killTally)
             } else {
                 zombie.launch(with: radialImpulse(from: point, to: zombie.position, radius: radius, maxImpulse: maxImpulse, minImpulse: minImpulse))
             }
@@ -1826,7 +1710,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             let zombie = entry.zombie
             let falloff = pow(0.5, CGFloat(index))
             let hitDamage = (zombie.kind.isBoss ? zombie.kind.hitPoints * 0.14 : zombie.kind.hitPoints * 1.2) * falloff
-            if zombie.damage(hitDamage) { defeat(zombie, reason: .weapon) }
+            if zombie.damage(hitDamage) { comboSystem.defeat(zombie, reason: .weapon) }
             playDirectionalDebris(at: zombie.position, color: .yellow, direction: zombie.approachesFromLeft ? -1 : 1, count: max(2, 6 - index))
         }
         if !pierced.isEmpty { hitStop(duration: 0.14) }
@@ -1845,7 +1729,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             world.run(.sequence([.wait(forDuration: Double(tick) * 0.5), .run { [weak self] in
                 guard let self else { return }
                 for zombie in self.activeZombies where !zombie.isDefeated && abs(zombie.position.x - center.x) < halfWidth {
-                    if zombie.damage(0.85 * zombie.kind.weaponDamageMultiplier) { self.defeat(zombie, reason: .weapon) }
+                    if zombie.damage(0.85 * zombie.kind.weaponDamageMultiplier) { self.comboSystem.defeat(zombie, reason: .weapon) }
                 }
                 self.playCombatVFX(.explosion, at: center, size: halfWidth * 2.1, direction: 1, tint: .orange)
             }]))
@@ -1863,7 +1747,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         for (index, zombie) in ordered.enumerated() {
             world.run(.sequence([.wait(forDuration: Double(index) * 0.09), .run { [weak self, weak zombie] in
                 guard let self, let zombie else { return }
-                if zombie.damage(2.4 * zombie.kind.weaponDamageMultiplier) { self.defeat(zombie, reason: .weapon) }
+                if zombie.damage(2.4 * zombie.kind.weaponDamageMultiplier) { self.comboSystem.defeat(zombie, reason: .weapon) }
                 self.radialFlash(at: zombie.position, color: .cyan)
             }]))
         }
@@ -1966,7 +1850,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         ]))
     }
 
-    private func spawnPhysicsDebris(from zombie: ZombieNode, reason: DefeatReason) {
+    func spawnPhysicsDebris(from zombie: ZombieNode, reason: DefeatReason) {
         let impulseScale: CGFloat = reason == .explosion ? 1.8 : (zombie.kind.isBoss ? 0.75 : 1)
         if !settings.reducedMotion {
             let pieces = zombie.makePhysicsDebris()
@@ -2126,7 +2010,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     private func airstrikeImpact(x: CGFloat) {
         let point = CGPoint(x: x, y: groundY + 35)
         for zombie in activeZombies where !zombie.isDefeated && abs(zombie.position.x - x) < size.width * 0.22 {
-            if zombie.damage(5) { defeat(zombie, reason: .weapon) }
+            if zombie.damage(5) { comboSystem.defeat(zombie, reason: .weapon) }
         }
         playCombatVFX(.explosion, at: point, size: 238, direction: indexDirection(for: x))
         SoundManager.shared.play(.explosion)
@@ -2200,19 +2084,19 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         SoundManager.shared.duckMusic(strength: won ? 0.36 : 0.60, duration: 0.9)
         // Endless never "wins" (there's no wave count to clear), so its payout is scored from
         // performance instead of the win-gated per-level reward, and stars don't apply.
-        let earnedStars = level.isEndless ? 0 : GameRules.stars(score: score, health: health, startingHealth: startingHealth, won: won)
-        let baseReward = level.isEndless ? GameRules.survivalReward(score: score) : (won ? level.reward + earnedStars * 40 : 0)
+        let earnedStars = level.isEndless ? 0 : GameRules.stars(score: comboSystem.score, health: health, startingHealth: startingHealth, won: won)
+        let baseReward = level.isEndless ? GameRules.survivalReward(score: comboSystem.score) : (won ? level.reward + earnedStars * 40 : 0)
         // TIPS ARE POOLED only applies to endless (it's a perk from that mode's own perk pool) —
         // campaign/sandbox runs never populate perkSystem.activePerks, so nightShiftBonusMultiplier
         // is always exactly 1 there and this is a no-op.
         let reward = level.isSandbox ? 0 : Int(Double(baseReward) * settings.difficulty.rewardMultiplier * Double(perkSystem.nightShiftBonusMultiplier))
         // Sandbox has unlimited health/spawns, so every feat here is trivially farmable (stack ten
         // volatiles and pop them for a free CHAIN_REACTION_10) — same reasoning as reward above.
-        let result = LevelResult(levelID: level.id, score: score, stars: earnedStars, reward: reward, won: won, defeats: defeats, maxCombo: maxCombo, wave: wave, feats: level.isSandbox ? [] : achievedFeats)
+        let result = LevelResult(levelID: level.id, score: comboSystem.score, stars: earnedStars, reward: reward, won: won, defeats: comboSystem.defeats, maxCombo: comboSystem.maxCombo, wave: wave, feats: level.isSandbox ? [] : achievedFeats)
         gameDelegate?.gameScene(self, didFinish: result)
     }
 
-    private func spawnPickup(at point: CGPoint) {
+    func spawnPickup(at point: CGPoint) {
         let roll = Int.random(in: 0..<10)
         let choices = WeaponKind.allCases.filter { progress.isUnlocked($0) }
         guard let weapon = choices.randomElement() else { return }
@@ -2243,10 +2127,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                     notifyDelegate()
                     return true
                 } else if current.name == "pickup-coin" {
-                    score += 75
                     current.removeFromParent()
                     SoundManager.shared.play(.pickup)
-                    showScorePopup(at: location, score: 75)
+                    comboSystem.awardPickupScore(75, at: location)
                     return true
                 } else if current.name == "pickup-repair" {
                     health = min(startingHealth, health + GameRules.repairPickupAmount)
@@ -2263,9 +2146,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         return false
     }
 
-    private func notifyDelegate() {
+    func notifyDelegate() {
         gameDelegate?.gameScene(self, didUpdate: GameHUDSnapshot(
-            score: score,
+            score: comboSystem.score,
             wave: wave,
             waveStatus: waveStatus,
             waveStatusHighlighted: waveStatusHighlighted,
@@ -2340,7 +2223,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         world.addChild(diner)
     }
 
-    private func burst(at point: CGPoint, color: SKColor) {
+    func burst(at point: CGPoint, color: SKColor) {
         let count = settings.reducedMotion ? 5 : 12
         for index in 0..<count {
             let particle = SKShapeNode(circleOfRadius: CGFloat.random(in: 3...8))
@@ -2356,7 +2239,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         }
     }
 
-    private func playCombatVFX(_ effect: CombatVFX, at point: CGPoint, size: CGFloat, direction: CGFloat, tint: SKColor? = nil) {
+    func playCombatVFX(_ effect: CombatVFX, at point: CGPoint, size: CGFloat, direction: CGFloat, tint: SKColor? = nil) {
         let frameIndices = GameRules.animationFrameIndices(totalFrames: effect.frames.count, reducedMotion: settings.reducedMotion, emphasizedFrame: 2)
         let presentationFrames = frameIndices.map { effect.frames[$0] }
         let sprite = SKSpriteNode(texture: presentationFrames[0], size: CGSize(width: size, height: size))
@@ -2431,72 +2314,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         ring.zPosition = 130
         world.addChild(ring)
         ring.run(.sequence([.group([.scale(to: settings.reducedMotion ? 2 : 7, duration: 0.32), .fadeOut(withDuration: 0.34)]), .removeFromParent()]))
-    }
-
-    private func showCombo(at point: CGPoint) {
-        guard combo >= 2 else { return }
-        let label = SKLabelNode(fontNamed: "AvenirNext-Heavy")
-        label.text = "×\(combo) COMBO"
-        label.fontSize = min(42, 22 + CGFloat(combo))
-        label.fontColor = SKColor(hue: max(0, 0.14 - CGFloat(combo) * 0.01), saturation: 1, brightness: 1, alpha: 1)
-        label.position = CGPoint(x: point.x, y: min(size.height - 60, point.y + 52))
-        label.zPosition = 120
-        label.setScale(0.6)
-        world.addChild(label)
-        label.run(.sequence([
-            .group([.scale(to: 1, duration: 0.12), .moveBy(x: 0, y: 8, duration: 0.12)]),
-            .group([.moveBy(x: 0, y: 26, duration: 0.5), .fadeOut(withDuration: 0.5)]),
-            .removeFromParent()
-        ]))
-    }
-
-    /// The named-event banner (see ComboEvent) — the top of the on-kill feedback hierarchy: it
-    /// must always read as bigger and land faster than the score/combo popups underneath it and
-    /// the delayed achievement toast above it (see showFeatToast), since it's calling out *how*
-    /// the kill happened rather than just a running count or a longer-term unlock.
-    private func showComboEvent(_ event: ComboEvent, at point: CGPoint, power: CGFloat) {
-        let label = SKLabelNode(fontNamed: "AvenirNext-Heavy")
-        label.text = event.displayName
-        label.fontSize = 32 + power * 12
-        label.fontColor = comboEventColor(event)
-        label.horizontalAlignmentMode = .center
-        label.position = CGPoint(x: point.x, y: min(size.height - 64, point.y + 56))
-        label.zPosition = 121
-        label.setScale(0.4)
-        label.zRotation = CGFloat.random(in: -0.05...0.05)
-        world.addChild(label)
-        label.run(.sequence([
-            .group([.scale(to: 1.22, duration: 0.06), .moveBy(x: 0, y: 10, duration: 0.06)]),
-            .scale(to: 1, duration: 0.05),
-            .wait(forDuration: 0.32),
-            .group([.moveBy(x: 0, y: 24, duration: 0.42), .fadeOut(withDuration: 0.42), .scale(to: 0.85, duration: 0.42)]),
-            .removeFromParent()
-        ]))
-    }
-
-    private func comboEventColor(_ event: ComboEvent) -> SKColor {
-        switch event {
-        case .airMail: SKColor(red: 0.42, green: 0.78, blue: 1.0, alpha: 1)
-        case .friendlyFire: SKColor(red: 1.0, green: 0.55, blue: 0.18, alpha: 1)
-        case .zombieBowling: SKColor(red: 0.95, green: 0.92, blue: 0.55, alpha: 1)
-        case .chainReaction: SKColor(red: 1.0, green: 0.42, blue: 0.24, alpha: 1)
-        case .dinerSpecial: SKColor(red: 0.55, green: 1.0, blue: 0.62, alpha: 1)
-        case .headOverHeels: SKColor(red: 1.0, green: 0.32, blue: 0.68, alpha: 1)
-        case .graveyardShift: SKColor(red: 0.72, green: 0.58, blue: 1.0, alpha: 1)
-        case .doubleTap: SKColor(red: 1.0, green: 0.86, blue: 0.32, alpha: 1)
-        }
-    }
-
-    /// A floating "+score" popup on every kill, not just combo chains, so single defeats still feel rewarding.
-    private func showScorePopup(at point: CGPoint, score: Int) {
-        let label = SKLabelNode(fontNamed: "AvenirNext-Heavy")
-        label.text = "+\(score)"
-        label.fontSize = 17
-        label.fontColor = .white.withAlphaComponent(0.85)
-        label.position = CGPoint(x: point.x, y: min(size.height - 40, point.y + 18))
-        label.zPosition = 118
-        world.addChild(label)
-        label.run(.sequence([.group([.moveBy(x: 0, y: 22, duration: 0.45), .fadeOut(withDuration: 0.45)]), .removeFromParent()]))
     }
 
     /// `subtitle` (e.g. a wave modifier's banner text) renders as a second, smaller line under
@@ -2576,7 +2393,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         ]))
     }
 
-    private func shakeCamera(intensity: CGFloat = 1) {
+    func shakeCamera(intensity: CGFloat = 1) {
         guard !settings.reducedMotion, settings.screenShakeEnabled else { return }
         world.removeAction(forKey: "shake")
         world.run(.sequence([
@@ -2589,13 +2406,13 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     /// Freezes (or nearly freezes) the sim briefly on a satisfying hit, then resumes — a cheap
     /// "hit-stop" trick that reads as impact weight without any new art or animation states.
-    private func hitStop(duration: TimeInterval, slowFactor: CGFloat = 0.04) {
+    func hitStop(duration: TimeInterval, slowFactor: CGFloat = 0.04) {
         guard !settings.reducedMotion else { return }
         world.speed = slowFactor
         run(.sequence([.wait(forDuration: duration), .run { [weak self] in self?.world.speed = 1 }]), withKey: "hitStop")
     }
 
-    private func runHaptic(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {
+    func runHaptic(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {
         guard settings.hapticsEnabled else { return }
         UIImpactFeedbackGenerator(style: style).impactOccurred()
     }
@@ -2618,7 +2435,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     /// Stumble/knockback/slam/monster haptic tiers matching ZombieNode.lastImpactPower's 0...1.4
     /// scale, so a tiny flick barely taps and a monster slam hits as hard as UIKit allows.
-    private func impactHapticStyle(for power: CGFloat) -> UIImpactFeedbackGenerator.FeedbackStyle {
+    func impactHapticStyle(for power: CGFloat) -> UIImpactFeedbackGenerator.FeedbackStyle {
         switch power {
         case ..<0.18: .light
         case ..<0.5: .medium
@@ -2650,3 +2467,4 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 }
 
 extension GameScene: PerkSystemHost {}
+extension GameScene: ComboSystemHost {}
