@@ -120,9 +120,9 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// .doubleSided alternates strictly left/right/left/right rather than trusting Bool.random(),
     /// which could otherwise streak several spawns from the same side and read as a standard mission.
     private var nextDoubleSidedFromLeft = true
-    let bossHUD = SKNode()
-    private let bossHealthFill = SKShapeNode(rectOf: CGSize(width: 260, height: 12), cornerRadius: 6)
-    private let bossNameLabel = SKLabelNode(fontNamed: "AvenirNext-Heavy")
+    /// Boss HUD, boss-kind resolution, and boss-only spawn hooks.
+    private let bossDirector = BossDirector()
+    var bossHUD: SKNode { bossDirector.bossHUD }
 
     // 9_999, not 99: with the numeric health pool a fully upgraded diner's real max (up to 160)
     // could otherwise exceed sandbox's old "effectively unlimited" value.
@@ -158,12 +158,14 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         perkSystem.host = self
         comboSystem.host = self
         spawnDirector.host = self
+        bossDirector.host = self
         backgroundColor = level.skyColor
         physicsWorld.gravity = CGVector(dx: 0, dy: level.modifier == .lowGravity ? -3.8 : -8.8)
         physicsWorld.contactDelegate = self
         addChild(world)
         buildEnvironment()
-        buildBossHUD()
+        bossDirector.build(sceneSize: size)
+        addChild(bossDirector.bossHUD)
         SoundManager.shared.updateGameplayMix(wave: wave, healthFraction: 1)
         if level.isSandbox { spawnDirector.waveStatus = "SANDBOX" }
         notifyDelegate()
@@ -731,31 +733,20 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// one of the three offered cards.
     func choosePerk(_ perk: Perk) { perkSystem.choose(perk) }
 
-    /// Picks a random boss kind other than `kind` for DOUBLE BOSS — a list rather than a hardcoded
-    /// pair so it automatically includes whatever boss kinds exist as more get added. Restricted
-    /// to bosses this campaign progress has actually unlocked, same as `resolvedBossKind`, so
-    /// DOUBLE BOSS can't hand a player a boss they haven't earned yet just because it rolled
-    /// alongside one they have.
-    func otherBossKind(than kind: ZombieKind) -> ZombieKind {
-        GameRules.unlockedBossKinds(highestCompletedLevel: highestCompletedCampaignLevel)
-            .filter { $0 != kind }.randomElement() ?? .butcher
-    }
+    /// Forwards to `bossDirector` — kept as a same-named GameScene member because SpawnDirectorHost
+    /// (which predates BossDirector's extraction) still requires it.
+    func otherBossKind(than kind: ZombieKind) -> ZombieKind { bossDirector.otherBossKind(than: kind) }
 
     /// `PlayerProgress.highestUnlockedLevel` advances to N+1 only once level N is actually won, so
     /// subtracting 1 recovers "levels actually beaten" — 0 for a player who's never won a campaign
-    /// level. Shared by `resolvedBossKind`, `otherBossKind`, and `rollWaveModifier`'s WaveModifier
-    /// gate, so campaign progress means the same thing everywhere endless checks it.
+    /// level. Shared by BossDirector's `resolvedBossKind`/`otherBossKind` and SpawnDirector's
+    /// `rollWaveModifier` WaveModifier gate, so campaign progress means the same thing everywhere
+    /// endless checks it.
     var highestCompletedCampaignLevel: Int { max(0, progress.highestUnlockedLevel - 1) }
 
-    /// The wave's naturally-rotated boss (see GameRules.bossKind), downgraded to `.butcher` if
-    /// campaign hasn't unlocked it yet (see GameRules.unlockedBossKinds) — so Colossus/Bouncer
-    /// showing up in an endless run means the player actually beat the campaign level that
-    /// introduces them, not just that the wave number happened to line up.
-    func resolvedBossKind(forWave wave: Int) -> ZombieKind? {
-        guard let natural = GameRules.bossKind(forWave: wave) else { return nil }
-        let unlocked = GameRules.unlockedBossKinds(highestCompletedLevel: highestCompletedCampaignLevel)
-        return unlocked.contains(natural) ? natural : .butcher
-    }
+    /// Forwards to `bossDirector` — kept as a same-named GameScene member because SpawnDirectorHost
+    /// (which predates BossDirector's extraction) still requires it.
+    func resolvedBossKind(forWave wave: Int) -> ZombieKind? { bossDirector.resolvedBossKind(forWave: wave) }
 
     func didBegin(_ contact: SKPhysicsContact) {
         guard !gameOver else { return }
@@ -825,17 +816,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
             // real bowling-pin chain reaction instead of a stationary hitbox.
             for (zombie, otherZombie) in [(zombieA, zombieB), (zombieB, zombieA)] {
                 guard let zombie, !zombie.isDefeated else { continue }
-                // THE BOUNCER: armor only comes off when another zombie is genuinely thrown or
-                // knocked into it (isThrown), not just incidental crowd-pressure contact — weapons
-                // and traps never strip it either, only this. That's deliberate: the whole point
-                // is a boss that makes the player actually use the flick/knockback systems on
-                // other zombies instead of just pouring more weapon damage into a health bar.
-                if zombie.kind == .bouncer, zombie.isArmored, let otherZombie, otherZombie.isThrown {
-                    zombie.knockArmorPlate()
-                    playCombatVFX(.zombieSplatter, at: contact.contactPoint, size: 64, direction: 1)
-                    SoundManager.shared.play(.armorBreak)
-                    shakeCamera(intensity: 0.4)
-                }
+                bossDirector.handleBouncerArmorStrip(zombie, thrownInto: otherZombie, at: contact.contactPoint)
                 if zombie.damage(contact.collisionImpulse / 42) {
                     // Matches the armor-strip check above: only counts as "colliding it with
                     // another zombie" when the other one was actually thrown/knocked in, not an
@@ -1014,39 +995,6 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
     var sandboxStats: String { "ACTIVE \(activeZombies.count) • DEFEATS \(sandboxDefeats) • SPEED \(String(format: "%.1f", spawnDirector.sandboxSpeed))×" }
 
-    private func buildBossHUD() {
-        bossHUD.zPosition = 190
-        bossHUD.position = CGPoint(x: size.width / 2, y: size.height - 48)
-        bossHUD.isHidden = true
-
-        let backing = SKShapeNode(rectOf: CGSize(width: 276, height: 28), cornerRadius: 8)
-        backing.fillColor = .black.withAlphaComponent(0.78)
-        backing.strokeColor = SKColor(red: 0.92, green: 0.22, blue: 0.16, alpha: 1)
-        backing.lineWidth = 2
-        bossHUD.addChild(backing)
-
-        bossHealthFill.fillColor = SKColor(red: 0.92, green: 0.16, blue: 0.11, alpha: 1)
-        bossHealthFill.strokeColor = .clear
-        bossHealthFill.position.y = -4
-        bossHUD.addChild(bossHealthFill)
-
-        bossNameLabel.fontSize = 12
-        bossNameLabel.fontColor = .white
-        bossNameLabel.verticalAlignmentMode = .center
-        bossNameLabel.position.y = 11
-        bossHUD.addChild(bossNameLabel)
-        addChild(bossHUD)
-    }
-
-    private func showBossHUD(for zombie: ZombieNode) {
-        bossNameLabel.text = zombie.kind.displayName
-        bossHealthFill.xScale = 1
-        bossHUD.isHidden = false
-        zombie.onHealthChanged = { [weak self] fraction in
-            self?.bossHealthFill.xScale = max(0.001, fraction)
-        }
-    }
-
     /// Avoids SKNode.frame's accumulated-subtree walk by treating the zombie as a simple
     /// box around its position, since grounded zombies never need per-part precision here.
     private func zombieHasReachedHouse(_ zombie: ZombieNode) -> Bool {
@@ -1086,30 +1034,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
         )
         zombie.zPosition = 10
         world.addChild(zombie)
-        zombie.onArmorBroken = { SoundManager.shared.play(.armorBreak) }
-        zombie.onArmorFullyStripped = { [weak self, weak zombie] in
-            guard let self, let zombie else { return }
-            self.announce(text: "\(zombie.kind.displayName) IS EXPOSED!", color: .cyan)
-            SoundManager.shared.play(.armorBreak)
-            self.shakeCamera(intensity: 0.6)
-            self.runHaptic(.heavy)
-        }
-        zombie.onBossPhaseChanged = { [weak self, weak zombie] phase in
-            guard let self, let zombie else { return }
-            SoundManager.shared.playBossPhase(phase, pan: self.audioPan(for: zombie))
-            SoundManager.shared.updateGameplayMix(
-                wave: self.wave,
-                healthFraction: CGFloat(self.health) / CGFloat(max(1, self.startingHealth)),
-                bossPhase: phase
-            )
-        }
-        if kind.isBoss {
-            showBossHUD(for: zombie)
-            SoundManager.shared.playZombieVoice(for: kind, moment: .spawn, pan: audioPan(for: zombie))
-            SoundManager.shared.playBossLayer(phase: 1)
-        } else if Int.random(in: 0..<4) == 0 {
-            SoundManager.shared.playZombieVoice(for: kind, moment: .spawn, pan: audioPan(for: zombie))
-        }
+        bossDirector.configureBossHooks(on: zombie)
         zombie.playSpawn(reducedMotion: settings.reducedMotion)
     }
 
@@ -2280,3 +2205,4 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 extension GameScene: PerkSystemHost {}
 extension GameScene: ComboSystemHost {}
 extension GameScene: SpawnDirectorHost {}
+extension GameScene: BossDirectorHost {}
