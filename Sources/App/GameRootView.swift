@@ -67,7 +67,7 @@ final class GameSessionModel: ObservableObject, GameSceneDelegate, Identifiable 
     @Published private(set) var isPaused = false
     @Published private(set) var result: LevelResult?
     @Published var showsTutorial: Bool
-    /// Non-empty only while an endless-mode perk offer (see GameScene.offerPerkChoices) is
+    /// Non-empty only while an endless-mode perk offer (see PerkSystem.offerChoices) is
     /// awaiting the player's pick — GameContainerView shows the picker whenever this isn't empty.
     @Published private(set) var perkChoices: [Perk] = []
 

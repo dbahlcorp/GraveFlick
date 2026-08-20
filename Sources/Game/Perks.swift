@@ -1,8 +1,8 @@
 import Foundation
 
 /// Endless-mode roguelite perks — offered three at a time every 5th wave (see
-/// GameScene.offerPerkChoices), picked once per offer, never persisted past the run (unlike
-/// PlayerProgress's permanent upgrades). Each can be chosen again on a later offer; GameScene
+/// PerkSystem.offerChoices), picked once per offer, never persisted past the run (unlike
+/// PlayerProgress's permanent upgrades). Each can be chosen again on a later offer; PerkSystem
 /// tracks how many times via `activePerks: [Perk: Int]` and every mechanical hook scales with
 /// that stack count, so two runs that pick differently actually play differently.
 enum Perk: String, CaseIterable, Codable, Identifiable {
