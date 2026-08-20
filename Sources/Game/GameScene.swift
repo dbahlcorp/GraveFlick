@@ -651,6 +651,163 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
     /// (which predates WeaponSystem's extraction) still requires it.
     func explodeVolatile(at point: CGPoint) { weaponSystem.explodeVolatile(at: point) }
 
+    func spawnPhysicsDebris(from zombie: ZombieNode, reason: DefeatReason) {
+        let impulseScale: CGFloat = reason == .explosion ? 1.8 : (zombie.kind.isBoss ? 0.75 : 1)
+        if !settings.reducedMotion {
+            let pieces = zombie.makePhysicsDebris()
+            for (index, debris) in pieces.enumerated() {
+                debris.position = zombie.position
+                debris.zPosition = 28
+                world.addChild(debris)
+                let spread = CGFloat(index - 2) * 42 + CGFloat.random(in: -26...26)
+                debris.physicsBody?.applyImpulse(CGVector(dx: spread * impulseScale, dy: CGFloat.random(in: 90...180) * impulseScale))
+                debris.physicsBody?.angularVelocity = CGFloat.random(in: -7...7)
+                debris.run(.sequence([.wait(forDuration: 2.4), .fadeOut(withDuration: 0.5), .removeFromParent()]))
+            }
+        }
+        let splatterScale = (zombie.kind.isBoss ? 1.7 : 1) * (reason == .explosion ? 1.5 : 1)
+        spawnGoreSplatter(
+            at: zombie.position,
+            scale: splatterScale,
+            direction: zombie.approachesFromLeft ? -1 : 1,
+            reason: reason
+        )
+    }
+
+    /// Layered cartoon gore: a fast airborne burst followed by streaks, satellite drops, and a
+    /// long-lived ground stain. Explosions throw gore radially while impacts preserve momentum.
+    private func spawnGoreSplatter(at point: CGPoint, scale: CGFloat, direction: CGFloat, reason: DefeatReason) {
+        let baseColor = SKColor(red: 0.34, green: 0.58, blue: 0.08, alpha: 1)
+        if !settings.reducedMotion {
+            spawnAirborneGore(at: point, scale: scale, direction: direction, radial: reason == .explosion)
+        }
+
+        let container = SKNode()
+        container.position = CGPoint(x: point.x, y: groundY + 2)
+        container.zPosition = 2
+        world.addChild(container)
+
+        let pool = SKShapeNode(path: splatterBlobPath(radius: 35 * scale, verticalScale: 0.32))
+        pool.fillColor = baseColor.withAlphaComponent(0.66)
+        pool.strokeColor = .clear
+        container.addChild(pool)
+
+        let core = SKShapeNode(path: splatterBlobPath(radius: 20 * scale, points: 8, verticalScale: 0.28))
+        core.fillColor = SKColor(red: 0.16, green: 0.33, blue: 0.04, alpha: 0.62)
+        core.strokeColor = .clear
+        core.position = CGPoint(x: direction * 5 * scale, y: 0)
+        container.addChild(core)
+
+        let streakCount = reason == .explosion ? 8 : 5
+        for index in 0..<streakCount {
+            let angle: CGFloat = reason == .explosion
+                ? CGFloat(index) / CGFloat(streakCount) * .pi * 2 + CGFloat.random(in: -0.18...0.18)
+                : CGFloat.random(in: -0.42...0.42) + (direction < 0 ? .pi : 0)
+            let length = CGFloat.random(in: 30...88) * scale
+            let width = CGFloat.random(in: 3...7) * scale
+            let streak = SKShapeNode(path: splatterStreakPath(length: length, width: width))
+            streak.fillColor = baseColor.withAlphaComponent(CGFloat.random(in: 0.34...0.58))
+            streak.strokeColor = .clear
+            streak.zRotation = angle
+            container.addChild(streak)
+        }
+
+        let dropletCount = Int((reason == .explosion ? 13 : 9) * scale)
+        for _ in 0..<dropletCount {
+            let droplet = SKShapeNode(path: splatterBlobPath(radius: CGFloat.random(in: 3...10) * scale, points: 7, verticalScale: CGFloat.random(in: 0.28...0.58)))
+            droplet.fillColor = Bool.random()
+                ? baseColor.withAlphaComponent(CGFloat.random(in: 0.42...0.68))
+                : SKColor(red: 0.54, green: 0.76, blue: 0.12, alpha: CGFloat.random(in: 0.38...0.60))
+            droplet.strokeColor = .clear
+            let angle = reason == .explosion ? CGFloat.random(in: 0...(.pi * 2)) : CGFloat.random(in: -0.48...0.48) + (direction < 0 ? .pi : 0)
+            let travel = CGFloat.random(in: 24...116) * scale
+            droplet.position = CGPoint(x: cos(angle) * travel, y: sin(angle) * travel * 0.18)
+            container.addChild(droplet)
+        }
+
+        container.alpha = 0
+        container.setScale(0.6)
+        container.run(.sequence([
+            .group([.fadeAlpha(to: 1, duration: 0.06), .scale(to: 1.08, duration: 0.09)]),
+            .scale(to: 1, duration: 0.08),
+            .wait(forDuration: Double.random(in: 17...25)),
+            .fadeOut(withDuration: 3.5),
+            .removeFromParent()
+        ]))
+        retainGoreStain(container)
+    }
+
+    private func spawnAirborneGore(at point: CGPoint, scale: CGFloat, direction: CGFloat, radial: Bool) {
+        let count = min(34, Int((radial ? 24 : 16) * scale))
+        for index in 0..<count {
+            guard activeGoreDroplets < 90 else { break }
+            let angle = radial
+                ? CGFloat(index) / CGFloat(count) * .pi * 2 + CGFloat.random(in: -0.22...0.22)
+                : CGFloat.random(in: -0.72...0.34) + (direction < 0 ? .pi : 0)
+            let distance = CGFloat.random(in: 48...155) * scale
+            let landing = CGPoint(
+                x: max(8, min(size.width - 8, point.x + cos(angle) * distance)),
+                y: groundY + CGFloat.random(in: 2...10)
+            )
+            let peak = CGPoint(
+                x: point.x + (landing.x - point.x) * 0.42,
+                y: min(size.height - 20, point.y + CGFloat.random(in: 35...105) * scale)
+            )
+            let radius = CGFloat.random(in: 2.5...7.5) * min(1.5, scale)
+            let droplet = SKShapeNode(path: splatterBlobPath(radius: radius, points: 6, verticalScale: CGFloat.random(in: 0.7...1.35)))
+            droplet.fillColor = index.isMultiple(of: 4)
+                ? SKColor(red: 0.62, green: 0.82, blue: 0.14, alpha: 0.88)
+                : SKColor(red: 0.28, green: 0.54, blue: 0.06, alpha: 0.92)
+            droplet.strokeColor = .clear
+            droplet.position = point
+            droplet.zPosition = 130 + CGFloat(index % 3)
+            world.addChild(droplet)
+            activeGoreDroplets += 1
+            droplet.run(.sequence([
+                .group([.move(to: peak, duration: Double.random(in: 0.10...0.18)), .rotate(byAngle: CGFloat.random(in: -1.8...1.8), duration: 0.14)]),
+                .group([.move(to: landing, duration: Double.random(in: 0.18...0.30)), .scaleY(to: 0.28, duration: 0.24)]),
+                .wait(forDuration: Double.random(in: 1.0...2.1)),
+                .fadeOut(withDuration: 0.7),
+                .run { [weak self] in
+                    guard let self else { return }
+                    self.activeGoreDroplets = max(0, self.activeGoreDroplets - 1)
+                },
+                .removeFromParent()
+            ]))
+        }
+    }
+
+    private func retainGoreStain(_ stain: SKNode) {
+        goreStains.removeAll { $0.parent == nil }
+        goreStains.append(stain)
+        while goreStains.count > 28 {
+            let oldest = goreStains.removeFirst()
+            oldest.removeAllActions()
+            oldest.run(.sequence([.fadeOut(withDuration: 0.35), .removeFromParent()]))
+        }
+    }
+
+    private func splatterBlobPath(radius: CGFloat, points: Int = 9, verticalScale: CGFloat = 0.5) -> CGPath {
+        let path = CGMutablePath()
+        for index in 0..<points {
+            let angle = (CGFloat(index) / CGFloat(points)) * .pi * 2
+            let jittered = radius * CGFloat.random(in: 0.7...1.15)
+            let vertex = CGPoint(x: cos(angle) * jittered, y: sin(angle) * jittered * verticalScale)
+            if index == 0 { path.move(to: vertex) } else { path.addLine(to: vertex) }
+        }
+        path.closeSubpath()
+        return path
+    }
+
+    private func splatterStreakPath(length: CGFloat, width: CGFloat) -> CGPath {
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: 0, y: -width))
+        path.addCurve(to: CGPoint(x: length, y: 0), control1: CGPoint(x: length * 0.35, y: -width * 0.75), control2: CGPoint(x: length * 0.82, y: -width * 0.18))
+        path.addCurve(to: CGPoint(x: 0, y: width), control1: CGPoint(x: length * 0.78, y: width * 0.20), control2: CGPoint(x: length * 0.28, y: width * 0.72))
+        path.closeSubpath()
+        return path
+    }
+
     func finish(won: Bool) {
         guard !gameOver else { return }
         gameOver = true
