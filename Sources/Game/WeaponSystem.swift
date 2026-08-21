@@ -60,6 +60,7 @@ final class WeaponSystem {
     private var aimPreviewNode: SKNode?
     private struct Detonatable { let node: SKNode; let detonate: () -> Void }
     private var detonatables: [ObjectIdentifier: Detonatable] = [:]
+    private var deliveryTruckVictims: [ObjectIdentifier: Set<ObjectIdentifier>] = [:]
     var weaponCooldowns: [WeaponKind: TimeInterval] = [:]
     var trapCooldowns: [TrapKind: TimeInterval] = [:]
 
@@ -555,21 +556,22 @@ final class WeaponSystem {
         return tally
     }
 
-    /// Contact callbacks can repeat while a fast, non-colliding body overlaps a zombie. Recording
-    /// each victim on the short-lived truck node guarantees one damage event per pass and also
-    /// identifies the first collision, which earns the heavier audio/camera response.
+    /// Contact callbacks can repeat while a fast, non-colliding body overlaps a zombie. Tracking
+    /// each victim by identity in `deliveryTruckVictims` (keyed on the truck's own ObjectIdentifier,
+    /// mirroring `detonatables` above) guarantees one damage event per pass and identifies the
+    /// first collision, which earns the heavier audio/camera response. This avoids deriving a
+    /// dictionary key from a zombie's hashValue, which is address-based and could collide with a
+    /// new ZombieNode allocated at a since-deallocated victim's old address while the truck (whose
+    /// entry is cleared in `launchDeliveryTruck` once it's removed) is still alive.
     func registerDeliveryTruckHit(on zombie: ZombieNode, truck node: SKNode?) -> (accepted: Bool, firstImpact: Bool) {
         guard let node, node.name == WeaponKind.deliveryTruck.rawValue else { return (true, false) }
-        let userData = node.userData ?? {
-            let dictionary = NSMutableDictionary()
-            node.userData = dictionary
-            return dictionary
-        }()
-        let victimKey = "deliveryVictim_\(ObjectIdentifier(zombie).hashValue)"
-        guard userData[victimKey] == nil else { return (false, false) }
-        userData[victimKey] = true
-        let firstImpact = userData["deliveryHasImpacted"] == nil
-        userData["deliveryHasImpacted"] = true
+        let truckKey = ObjectIdentifier(node)
+        let zombieKey = ObjectIdentifier(zombie)
+        var victims = deliveryTruckVictims[truckKey] ?? []
+        guard !victims.contains(zombieKey) else { return (false, false) }
+        let firstImpact = victims.isEmpty
+        victims.insert(zombieKey)
+        deliveryTruckVictims[truckKey] = victims
         return (true, firstImpact)
     }
 
@@ -1044,12 +1046,16 @@ final class WeaponSystem {
                 .wait(forDuration: 0.075),
             ])), withKey: "roadTrail")
         }
+        let truckKey = ObjectIdentifier(truck)
         truck.run(.sequence([
             .wait(forDuration: 0.12),
             .run { [weak truck] in truck?.physicsBody?.velocity = CGVector(dx: dx, dy: 0) },
             .wait(forDuration: 1.05),
             .fadeOut(withDuration: 0.15),
-            .removeFromParent(),
+            .run { [weak self, weak truck] in
+                self?.deliveryTruckVictims.removeValue(forKey: truckKey)
+                truck?.removeFromParent()
+            },
         ]))
     }
 

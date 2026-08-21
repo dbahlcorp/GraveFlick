@@ -294,11 +294,12 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
 
         if let zombie = zombieBody(in: bodies), let weaponBody = bodies.first(where: { $0.categoryBitMask == PhysicsCategory.weapon }) {
             let weaponKind = weaponBody.node?.name.flatMap(WeaponKind.init(rawValue:))
-            if weaponKind == .deliveryTruck {
+            let isDeliveryRush = weaponKind == .deliveryTruck
+            let deliveryTruckDirection: CGFloat = weaponBody.velocity.dx >= 0 ? 1 : -1
+            if isDeliveryRush {
                 let registration = weaponSystem.registerDeliveryTruckHit(on: zombie, truck: weaponBody.node)
                 guard registration.accepted else { return }
-                let direction: CGFloat = weaponBody.velocity.dx >= 0 ? 1 : -1
-                playCombatVFX(.deliveryTruckImpact, at: contact.contactPoint, size: 154, direction: direction)
+                playCombatVFX(.deliveryTruckImpact, at: contact.contactPoint, size: 154, direction: deliveryTruckDirection)
                 if registration.firstImpact {
                     SoundManager.shared.play(.deliveryImpact)
                     SoundManager.shared.duckMusic(strength: 0.38, duration: 0.44)
@@ -311,11 +312,11 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 SoundManager.shared.play(sound)
             }
             playCombatVFX(.zombieSplatter, at: contact.contactPoint, size: 92, direction: zombie.approachesFromLeft ? -1 : 1)
-            let isDeliveryRush = weaponKind == .deliveryTruck
             let baseDamage: CGFloat = isDeliveryRush ? 7 : (zombie.kind == .brute ? 1.8 : 4)
-            // Frozen-solid zombies shatter for much higher weapon-contact damage (Flash Freezer),
+            // Frozen-solid zombies shatter for much higher weapon-contact damage (Flash Freezer)
             // and bypass the usual "survives its first ordinary hit" floor — that's the whole
-            // point of brittleness — while a normal zombie's first hit is unaffected.
+            // point of brittleness. Delivery Truck also bypasses that floor (isDeliveryRush) since
+            // getting run over shouldn't be survivable just because it's a zombie's first hit.
             if zombie.damageAt(
                 contact.contactPoint,
                 amount: baseDamage * zombie.kind.weaponDamageMultiplier * zombie.frozenImpactDamageMultiplier,
@@ -336,8 +337,7 @@ final class GameScene: SKScene, SKPhysicsContactDelegate {
                 // striking upward, instead of both looking identical.
                 if zombie.canBeKnockedBack {
                     if isDeliveryRush {
-                        let direction: CGFloat = weaponBody.velocity.dx >= 0 ? 1 : -1
-                        knockback(zombie, impulse: CGVector(dx: direction * 360, dy: 165))
+                        knockback(zombie, impulse: CGVector(dx: deliveryTruckDirection * 360, dy: 165))
                     } else {
                         knockback(zombie, impulse: CGVector(dx: weaponBody.velocity.dx * 0.32, dy: weaponBody.velocity.dy * 0.22 + 90))
                     }
