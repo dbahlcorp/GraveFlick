@@ -69,6 +69,27 @@ enum WeaponKind: String, CaseIterable, Codable, Identifiable {
         case .meteor: "weapon_meteor"
         }
     }
+    /// Player-facing input copy shared by the field guide and accessibility labels. Keeping this
+    /// next to the weapon definition prevents the help screen from drifting away from the actual
+    /// gesture routing in WeaponSystem.
+    var aimInstruction: String {
+        switch self {
+        case .anvil, .meteor, .shotgun:
+            "Arm it, then tap the battlefield to choose the target."
+        case .bowlingBall, .grenade, .propaneTank:
+            "Arm it, then drag and release on the battlefield to throw it."
+        case .deliveryTruck:
+            "Arm it, then drag and release to choose its lane and direction."
+        case .sniper:
+            "Arm it, drag a firing line through the horde, then release."
+        case .greaseFire, .airstrike:
+            "Arm it, then draw a path across the battlefield."
+        case .transformer:
+            "Arm it, then tap the transformer pole placed on the battlefield."
+        case .wreckingBall:
+            "Arm it, pull the ball like a pendulum, then release."
+        }
+    }
     var cooldown: TimeInterval {
         switch self {
         case .bowlingBall: 7
@@ -305,8 +326,12 @@ struct GameSettings: Codable, Equatable {
     var screenShakeEnabled = true
     var flashesEnabled = true
     var difficulty: GameDifficulty = .standard
+    /// Off by default — Game Center integration is opt-in (see PRIVACY.md); GraveFlick never
+    /// triggers Apple's sign-in sheet or reports scores/achievements until the player turns this
+    /// on from Settings.
+    var gameCenterEnabled = false
 
-    private enum CodingKeys: String, CodingKey { case musicEnabled, soundEnabled, musicVolume, soundVolume, ambienceVolume, hapticsEnabled, reducedMotion, highContrast, goreEnabled, screenShakeEnabled, flashesEnabled, difficulty }
+    private enum CodingKeys: String, CodingKey { case musicEnabled, soundEnabled, musicVolume, soundVolume, ambienceVolume, hapticsEnabled, reducedMotion, highContrast, goreEnabled, screenShakeEnabled, flashesEnabled, difficulty, gameCenterEnabled }
     init() {}
     init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
@@ -322,6 +347,7 @@ struct GameSettings: Codable, Equatable {
         screenShakeEnabled = try values.decodeIfPresent(Bool.self, forKey: .screenShakeEnabled) ?? true
         flashesEnabled = try values.decodeIfPresent(Bool.self, forKey: .flashesEnabled) ?? true
         difficulty = try values.decodeIfPresent(GameDifficulty.self, forKey: .difficulty) ?? .standard
+        gameCenterEnabled = try values.decodeIfPresent(Bool.self, forKey: .gameCenterEnabled) ?? false
     }
 }
 

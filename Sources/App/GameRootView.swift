@@ -3,7 +3,7 @@ import SwiftUI
 import UIKit
 
 enum AppScreen: Equatable {
-    case menu, levels, challenges, sandbox, upgrades, settings, credits, game
+    case menu, levels, challenges, sandbox, upgrades, settings, fieldGuide, credits, game
 }
 
 @MainActor
@@ -19,7 +19,12 @@ final class AppModel: ObservableObject {
 
     init() {
         SoundManager.shared.apply(store.settings)
-        GameCenterManager.shared.authenticate()
+        // Opt-in (see GameSettings.gameCenterEnabled) — only reconnects here for a player who
+        // already turned this on in a previous session; never triggers Apple's sign-in sheet
+        // on its own for a player who hasn't asked for it.
+        if store.settings.gameCenterEnabled {
+            GameCenterManager.shared.authenticate()
+        }
     }
 
     func start(_ level: GameLevel) {
@@ -32,6 +37,11 @@ final class AppModel: ObservableObject {
             self.newlyUnlocked = after.subtracting(before)
                 .compactMap { raw in WeaponKind(rawValue: raw)?.title ?? TrapKind(rawValue: raw)?.title }
                 .sorted()
+            // store.progress is fresh here (store.complete just ran), so a badge earned by
+            // *this* completion reports immediately instead of waiting for the next run's stale
+            // pre-run snapshot to catch up (see GameSessionModel.progress, captured at session
+            // start and never re-synced with the store).
+            GameCenterManager.shared.report(result, achievements: self.store.progress.achievements)
         }
         screen = .game
         SoundManager.shared.apply(store.settings)
@@ -106,8 +116,10 @@ final class GameSessionModel: ObservableObject, GameSceneDelegate, Identifiable 
     func gameScene(_ scene: GameScene, didFinish result: LevelResult) {
         self.result = result
         isPaused = false
+        // Game Center reporting happens in AppModel.start's completion closure, after
+        // store.complete(result) — this session's own `progress` is a pre-run snapshot and would
+        // report achievements this very run just earned as still locked.
         completion(result)
-        GameCenterManager.shared.report(result, achievements: progress.achievements)
     }
 
     func togglePause() {
@@ -153,6 +165,8 @@ struct GameRootView: View {
                 UpgradeShopView(model: model, store: model.store)
             case .settings:
                 SettingsView(model: model, store: model.store)
+            case .fieldGuide:
+                FieldGuideView { model.screen = .menu }
             case .credits:
                 CreditsView(model: model, store: model.store)
             case .game:
@@ -251,6 +265,7 @@ private struct MainMenuView: View {
                             HStack(spacing: 7) {
                                 UtilityMenuButton(title: "UPGRADES", icon: "ui_upgrades", color: .purple) { model.screen = .upgrades }
                                 UtilityMenuButton(title: "SETTINGS", icon: "ui_settings", color: .gray) { model.screen = .settings }
+                                UtilityMenuButton(title: "HOW TO", icon: "ui_tutorial_grab", color: .cyan) { model.screen = .fieldGuide }
                                 UtilityMenuButton(title: "CREDITS", icon: "ui_info", color: .indigo) { model.screen = .credits }
                             }
 
@@ -276,6 +291,12 @@ private struct MainMenuView: View {
                                 .foregroundStyle(.white.opacity(0.62))
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.72)
+                            }
+                            if store.recoveredCorruptSave {
+                                Text("LAST-KNOWN-GOOD SAVE RECOVERED")
+                                    .font(.system(size: 8, weight: .black))
+                                    .foregroundStyle(.yellow)
+                                    .accessibilityLabel("Your last known good save was recovered")
                             }
                             }
                             Spacer(minLength: 0)
@@ -575,7 +596,9 @@ private struct SettingsView: View {
 /// so players can retune audio/accessibility options without abandoning a run.
 private struct SettingsPanel: View {
     @ObservedObject var store: ProgressStore
+    @ObservedObject private var gameCenter = GameCenterManager.shared
     @State private var confirmsReset = false
+    @State private var showsGameCenterDashboard = false
 
     var body: some View {
         VStack(spacing: 16) {
@@ -600,6 +623,27 @@ private struct SettingsPanel: View {
             }
             .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 22))
             .frame(maxWidth: 560)
+            VStack(spacing: 10) {
+                gameCenterToggle
+                Button {
+                    showsGameCenterDashboard = true
+                } label: {
+                    HStack(spacing: 10) {
+                        BundledArtImage(name: "ui_achievement", subdirectory: "Art/UI/Icons").scaledToFit().frame(width: 20, height: 20)
+                        Text("VIEW LEADERBOARDS & ACHIEVEMENTS").font(.caption.weight(.black))
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 40)
+                }
+                .buttonStyle(.bordered)
+                .tint(.cyan)
+                .disabled(!gameCenter.isAuthenticated)
+                .opacity(gameCenter.isAuthenticated ? 1 : 0.5)
+                .padding(.horizontal, 20)
+                .padding(.bottom, 14)
+            }
+            .padding(.top, 4)
+            .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 22))
+            .frame(maxWidth: 560)
             Button("RESET ALL PROGRESS", role: .destructive) { confirmsReset = true }
                 .font(.caption.weight(.black))
             Text("GraveFlick uses no analytics, advertising identifiers, accounts, or network tracking.")
@@ -608,12 +652,40 @@ private struct SettingsPanel: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 520)
         }
+        .sheet(isPresented: $showsGameCenterDashboard) { GameCenterDashboard() }
         .alert("Reset all progress?", isPresented: $confirmsReset) {
             Button("Cancel", role: .cancel) {}
             Button("Reset", role: .destructive) { store.resetAll() }
         } message: {
             Text("Levels, high scores, upgrades, and coins will be erased from this device.")
         }
+    }
+
+    /// Distinct from `settingToggle` — turning this on must also kick off `authenticate()`
+    /// (which presents Apple's own sign-in sheet, per PRIVACY.md), not just flip a settings bit.
+    private var gameCenterToggle: some View {
+        Toggle(isOn: Binding(
+            get: { store.settings.gameCenterEnabled },
+            set: { value in
+                store.settings.gameCenterEnabled = value
+                if value { GameCenterManager.shared.authenticate() }
+            }
+        )) {
+            HStack(spacing: 12) {
+                BundledArtImage(name: "ui_achievement", subdirectory: "Art/UI/Icons").scaledToFit().frame(width: 30, height: 30)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Game Center").font(.headline)
+                    Text("Sign in through Apple's own prompt to submit scores and achievements.")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+            }
+        }
+        .tint(.orange)
+        .foregroundStyle(.white)
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .frame(minHeight: 54)
     }
 
     private func settingToggle(_ title: String, icon: String, keyPath: WritableKeyPath<GameSettings, Bool>) -> some View {
@@ -671,6 +743,8 @@ private struct GameContainerView: View {
             SpriteView(scene: session.scene, options: [.ignoresSiblingOrder])
                 .id(session.id)
                 .ignoresSafeArea()
+                .accessibilityLabel("GraveFlick battlefield")
+                .accessibilityHint("Drag creatures and perform armed weapon gestures directly on the battlefield.")
 
             // Ratio-based, not a fixed point count: health is a numeric pool now (GameRules
             // .startingHealth), scaled up from the old 5-heart system, so a fixed threshold
@@ -696,6 +770,23 @@ private struct GameContainerView: View {
                     .padding(.top, 5)
                     .accessibilityLabel("Wave status, \(session.waveStatus)")
                 Spacer()
+                if let armed = session.armedWeapon {
+                    HStack(spacing: 8) {
+                        BundledArtImage(name: armed.icon, subdirectory: "Art/Weapons").scaledToFit().frame(width: 20, height: 20)
+                        Text("\(armed.title.uppercased()): \(armed.aimInstruction)")
+                            .font(.system(size: 8, weight: .bold))
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.72)
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(Color.black.opacity(0.78), in: Capsule())
+                    .overlay(Capsule().stroke(Color.cyan.opacity(0.70)))
+                    .padding(.bottom, 5)
+                    .transition(store.settings.reducedMotion ? .identity : .move(edge: .bottom).combined(with: .opacity))
+                    .accessibilityElement(children: .combine)
+                }
                 actionBar
             }
             .padding(.horizontal, 18)
@@ -927,6 +1018,8 @@ private struct GameContainerView: View {
         .background(LinearGradient(colors: [color.opacity(0.16), .black.opacity(0.78)], startPoint: .topLeading, endPoint: .bottomTrailing), in: UnevenRoundedRectangle(topLeadingRadius: 11, bottomLeadingRadius: 5, bottomTrailingRadius: 11, topTrailingRadius: 5))
         .overlay(UnevenRoundedRectangle(topLeadingRadius: 11, bottomLeadingRadius: 5, bottomTrailingRadius: 11, topTrailingRadius: 5).stroke(color.opacity(0.45)))
         .overlay(alignment: .bottomLeading) { Capsule().fill(color.opacity(0.72)).frame(width: 34, height: 2).padding(.leading, 8).offset(y: -3) }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(label), \(value)")
     }
 
     private var tutorial: some View {
@@ -1261,7 +1354,7 @@ private struct MenuRivet: View {
     }
 }
 
-private struct BundledArtImage: View {
+struct BundledArtImage: View {
     let name: String
     let subdirectory: String
 

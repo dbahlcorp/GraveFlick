@@ -2,9 +2,6 @@ import SpriteKit
 
 final class DinerNode: SKNode {
     private let building = SKSpriteNode(imageNamed: "diner_complete")
-    private let damagedBuilding = SKSpriteNode(imageNamed: "diner_damaged")
-    private let severeBuilding = SKSpriteNode(imageNamed: "diner_severe")
-    private let destroyedBuilding = SKSpriteNode(imageNamed: "diner_destroyed")
     private let title = SKLabelNode(fontNamed: "AvenirNext-Heavy")
     private let neonGlow = SKShapeNode(rectOf: CGSize(width: 1, height: 1), cornerRadius: 16)
     private let leftWindowGlow = SKShapeNode(rectOf: CGSize(width: 1, height: 1), cornerRadius: 8)
@@ -17,6 +14,7 @@ final class DinerNode: SKNode {
     private let defender: DinerDefenderNode
     private let reducedMotion: Bool
     private var damageStage = 0
+    private var displayedDamageStage = 0
     var currentDamageStage: Int { damageStage }
     var componentAnimationIsRunning: Bool {
         marqueeArt.action(forKey: "marqueeFrames") != nil || doorArt.action(forKey: "doorFrames") != nil || ventArt.action(forKey: "ventFrames") != nil
@@ -43,18 +41,9 @@ final class DinerNode: SKNode {
         building.size = Self.aspectFit(building.texture?.size() ?? .zero, inside: frame.size)
         building.zPosition = 2
         addChild(building)
-        for (sprite, zPosition) in [(damagedBuilding, CGFloat(2.05)), (severeBuilding, CGFloat(2.1)), (destroyedBuilding, CGFloat(2.2))] {
-            sprite.texture?.filteringMode = .linear
-            sprite.size = building.size
-            sprite.zPosition = zPosition
-            sprite.alpha = 0
-            addChild(sprite)
-        }
         if highContrast {
-            [building, damagedBuilding, severeBuilding, destroyedBuilding].forEach {
-                $0.color = .white
-                $0.colorBlendFactor = 0.12
-            }
+            building.color = .white
+            building.colorBlendFactor = 0.12
         }
         position = CGPoint(x: frame.midX, y: frame.minY + building.size.height / 2)
 
@@ -109,9 +98,9 @@ final class DinerNode: SKNode {
     }
 
     var hasCompleteAssetSet: Bool {
-        let buildingsComplete = [building, damagedBuilding, severeBuilding, destroyedBuilding].allSatisfy {
-            guard let texture = $0.texture else { return false }
-            return texture.size().width > 1 && texture.size().height > 1
+        let buildingsComplete = ["complete", "damaged", "severe", "destroyed"].allSatisfy { state in
+            let size = SKTexture(imageNamed: "diner_\(state)").size()
+            return size.width > 1 && size.height > 1
         }
         let componentsComplete = ["marquee", "door", "vent"].allSatisfy { component in
             (1...4).allSatisfy { SKTexture(imageNamed: "diner_\(component)_\($0)").size().width > 1 }
@@ -160,12 +149,10 @@ final class DinerNode: SKNode {
         damageStage = max(damageStage, ratio <= 0 ? 3 : (ratio <= 0.34 ? 2 : (ratio <= 0.67 ? 1 : 0)))
         defender.reactToDamage(stage: damageStage)
 
-        [building, damagedBuilding, severeBuilding, destroyedBuilding].forEach {
-            $0.run(.sequence([
-                .colorize(with: .red, colorBlendFactor: 0.82, duration: 0.06),
-                .colorize(withColorBlendFactor: damageStage >= 2 ? 0.12 : 0, duration: 0.22)
-            ]), withKey: "damageFlash")
-        }
+        building.run(.sequence([
+            .colorize(with: .red, colorBlendFactor: 0.82, duration: 0.06),
+            .colorize(withColorBlendFactor: damageStage >= 2 ? 0.12 : 0, duration: 0.22)
+        ]), withKey: "damageFlash")
 
         neonGlow.run(.sequence([
             .fadeAlpha(to: 0.08, duration: 0.035),
@@ -249,13 +236,12 @@ final class DinerNode: SKNode {
     private func applyDamageAppearance() {
         switch damageStage {
         case 1:
-            transition(to: damagedBuilding, hiding: building)
+            transitionBuilding(to: "diner_damaged")
             rightWindowGlow.alpha = 0.58
             neonGlow.zRotation = -0.014
             setComponentDamageFrame(2)
         case 2:
-            transition(to: severeBuilding, hiding: damagedBuilding)
-            building.alpha = 0
+            transitionBuilding(to: "diner_severe")
             rightWindowGlow.alpha = 0.12
             leftWindowGlow.alpha = 0.34
             neonGlow.alpha = 0.42
@@ -264,14 +250,12 @@ final class DinerNode: SKNode {
             startDamageSmoke()
             setComponentDamageFrame(3)
         case 3:
-            transition(to: destroyedBuilding, hiding: severeBuilding)
-            building.alpha = 0
-            damagedBuilding.alpha = 0
+            transitionBuilding(to: "diner_destroyed")
             rightWindowGlow.alpha = 0
             leftWindowGlow.alpha = 0.08
             neonGlow.alpha = 0.10
             title.alpha = 0.08
-            destroyedBuilding.run(.sequence([
+            building.run(.sequence([
                 .group([.scaleX(to: 1.045, duration: 0.10), .scaleY(to: 0.91, duration: 0.10), .moveBy(x: 0, y: -7, duration: 0.10)]),
                 .group([.scaleX(to: 1, duration: 0.16), .scaleY(to: 1, duration: 0.16), .moveBy(x: 0, y: 2, duration: 0.16)])
             ]), withKey: "collapse")
@@ -283,13 +267,28 @@ final class DinerNode: SKNode {
         default:
             break
         }
+        displayedDamageStage = max(displayedDamageStage, damageStage)
     }
 
-    private func transition(to revealed: SKSpriteNode, hiding hidden: SKSpriteNode) {
-        revealed.removeAction(forKey: "reveal")
-        hidden.removeAction(forKey: "hide")
-        revealed.run(.fadeIn(withDuration: reducedMotion ? 0.01 : 0.22), withKey: "reveal")
-        hidden.run(.fadeOut(withDuration: reducedMotion ? 0.01 : 0.22), withKey: "hide")
+    /// Keep only the visible full-resolution diner state resident. The previous art exists solely
+    /// for the short crossfade, then releases its texture instead of four 1448×1086 plates living
+    /// for the entire run.
+    private func transitionBuilding(to textureName: String) {
+        guard damageStage > displayedDamageStage else { return }
+        let previous = SKSpriteNode(texture: building.texture)
+        previous.size = building.size
+        previous.position = building.position
+        previous.zPosition = building.zPosition + 0.01
+        previous.color = building.color
+        previous.colorBlendFactor = building.colorBlendFactor
+        addChild(previous)
+
+        let texture = SKTexture(imageNamed: textureName)
+        texture.filteringMode = .linear
+        building.texture = texture
+        building.alpha = reducedMotion ? 1 : 0
+        building.run(.fadeIn(withDuration: reducedMotion ? 0.01 : 0.22), withKey: "reveal")
+        previous.run(.sequence([.fadeOut(withDuration: reducedMotion ? 0.01 : 0.22), .removeFromParent()]), withKey: "retireDamageState")
     }
 
     private func setComponentDamageFrame(_ frame: Int) {

@@ -143,4 +143,46 @@ final class ProgressStoreTests: XCTestCase {
         XCTAssertEqual(settings.ambienceVolume, 0.72)
         XCTAssertFalse(settings.soundEnabled)
     }
+
+    func testCorruptPrimaryRecoversLastKnownGoodProgress() throws {
+        let store = ProgressStore(defaults: defaults)
+        store.complete(LevelResult(levelID: 1, score: 1_200, stars: 2, reward: 260, won: true, defeats: 10, maxCombo: 4, wave: 3))
+        // A second successful save moves the completed-run payload into the last-known-good slot.
+        store.buyWeaponUpgrade(.bowlingBall)
+        defaults.set(Data("not-json".utf8), forKey: "graveflick.progress.v1")
+
+        let recovered = ProgressStore(defaults: defaults)
+
+        XCTAssertTrue(recovered.recoveredCorruptSave)
+        XCTAssertEqual(recovered.progress.highestUnlockedLevel, 2)
+        XCTAssertEqual(recovered.progress.highScores[1], 1_200)
+        XCTAssertNoThrow(try JSONDecoder().decode(PlayerProgress.self, from: defaults.data(forKey: "graveflick.progress.v1")!))
+    }
+
+    func testLoadedProgressIsNormalizedToSafeGameplayBounds() {
+        let malformed = #"{"currency":-50,"highestUnlockedLevel":999,"highScores":{"1":-4},"stars":{"1":12},"upgradeLevels":{"flickTraining":99},"unlockedWeapons":[],"unlockedTraps":[],"achievements":[],"dailyDate":"","dailyDefeats":-2,"dailyClaimed":false,"hasSeenTutorial":false,"totalDefeats":-9,"bestCombo":-3,"bossDefeats":-1}"#
+        defaults.set(Data(malformed.utf8), forKey: "graveflick.progress.v1")
+
+        let progress = ProgressStore(defaults: defaults).progress
+
+        XCTAssertEqual(progress.currency, 0)
+        XCTAssertEqual(progress.highestUnlockedLevel, GameLevel.campaign.count)
+        XCTAssertEqual(progress.highScores[1], 0)
+        XCTAssertEqual(progress.stars[1], 3)
+        XCTAssertEqual(progress.upgradeLevel(.flickTraining), 3)
+        XCTAssertEqual(progress.dailyDefeats, 0)
+        XCTAssertEqual(progress.totalDefeats, 0)
+    }
+
+    func testResetRemovesRecoveryCopies() {
+        let store = ProgressStore(defaults: defaults)
+        store.complete(LevelResult(levelID: 1, score: 500, stars: 1, reward: 180, won: true, defeats: 5, maxCombo: 2, wave: 3))
+        XCTAssertNotNil(defaults.data(forKey: "graveflick.progress.v1.backup"))
+
+        store.resetAll()
+
+        XCTAssertNil(defaults.data(forKey: "graveflick.progress.v1"))
+        XCTAssertNil(defaults.data(forKey: "graveflick.progress.v1.backup"))
+        XCTAssertFalse(store.recoveredCorruptSave)
+    }
 }

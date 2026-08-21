@@ -44,6 +44,7 @@ The project takes inspiration from the tactile physics of early mobile games whi
 - Optional haptics, reduced motion, high contrast, gore toggle, screen shake toggle, and flash toggle
 - Three difficulty tiers (Casual, Standard, Nightmare) affecting enemy speed, health, spawn rate, and reward payout
 - Original generated app icon and character atlas integrated into the runtime
+- A permanent in-game Field Guide covering controls, every weapon gesture, threats, and modes
 - No advertising, analytics, tracking, or third-party runtime dependencies — Game Center is Apple's own framework and only used if the player opts in
 
 ## Open in Xcode
@@ -76,7 +77,7 @@ The deployment target is iOS 17. The bundle identifier is `com.bahlcorp.gravefli
 
 ## Privacy and store preparation
 
-See `PRIVACY.md` for the privacy policy and `STORE_METADATA.md` for grounded App Store copy. The privacy manifest declares local preferences access and no tracking or collected data.
+See `PRIVACY.md` for the privacy policy, `STORE_METADATA.md` for grounded App Store copy, and `RELEASE_CHECKLIST.md` for the device, playtest, and submission gates. The privacy manifest declares local preferences access and no tracking or collected data.
 
 ## Remaining release work
 

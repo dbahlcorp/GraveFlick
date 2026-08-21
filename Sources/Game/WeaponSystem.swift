@@ -106,9 +106,8 @@ final class WeaponSystem {
         CGPoint(x: host.houseFrame.midX + host.houseFrame.width * 0.18, y: host.groundY + host.houseFrame.height * 0.43)
     }
 
-    /// Anvil/Meteor/Scatterblast are tap-targeted for good — the rest still resolve as `.tap`
-    /// (fire immediately on touch-down, ignoring where they're aimed) until their drag/paint/
-    /// pierce logic is built, one weapon at a time.
+    /// Single source of truth for the runtime gesture behind each player-facing instruction in
+    /// WeaponKind.aimInstruction and the in-game Field Guide.
     private func aimGesture(for kind: WeaponKind) -> WeaponAimGesture {
         switch kind {
         case .anvil, .meteor, .shotgun: .tap
